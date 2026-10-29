@@ -338,6 +338,72 @@ app.post('/api/vpn/login', (req, res) => {
   else res.status(500).json({ error: out || 'login failed' });
 });
 
+// ── VPN status / test ──────────────────────────────────────────────────────
+const { execFile } = require('child_process');
+function run(cmd, args, timeout = 15000) {
+  return new Promise(resolve => execFile(cmd, args, { timeout, encoding: 'utf8' },
+    (err, stdout, stderr) => resolve({ ok: !err, out: ((stdout || '') + (stderr || '')).replace(/[\r\x00-\x08]|\x1b\[[0-9;?]*[A-Za-z]|[-\\|/]\s{2,}/g, '').trim() })));
+}
+async function publicIp() {
+  try {
+    const r = await fetch('https://api.ipify.org?format=json', { signal: AbortSignal.timeout(8000) });
+    return (await r.json()).ip;
+  } catch { return null; }
+}
+async function vpnInfo() {
+  if (!IS_LINUX) return { cli: false, logged_in: null, connected: vpnUp(), detail: 'Login status is only available with the Linux CLI.' };
+  const acc = await run('nordvpn', ['account']);
+  const st  = await run('nordvpn', ['status']);
+  const notLogged = /not logged in|log in/i.test(acc.out) || (!acc.ok && /login/i.test(acc.out));
+  const missing = !acc.ok && /ENOENT|not found/i.test(acc.out);
+  return {
+    cli: !missing,
+    logged_in: missing ? false : !notLogged && acc.ok,
+    account: acc.out.split('\n').find(l => /email/i.test(l))?.replace(/^.*?:\s*/, '') || null,
+    connected: /Status:\s*Connected/i.test(st.out),
+    country: st.out.match(/Country:\s*(.+)/i)?.[1]?.trim() || null,
+    ip: st.out.match(/\bIP:\s*(\S+)/i)?.[1] || null,
+    detail: missing ? 'nordvpn CLI not installed' : (notLogged ? 'Not logged in' : ''),
+  };
+}
+app.get('/api/vpn/status', async (req, res) => res.json(await vpnInfo()));
+
+let _vpnTesting = false;
+app.post('/api/vpn/test', async (req, res) => {
+  if (_vpnTesting) return res.status(400).json({ error: 'test already running' });
+  _vpnTesting = true;
+  const country = req.body?.country || loadCfg().nordvpn?.country || 'United Kingdom';
+  const steps = [];
+  const step = (name, ok, detail = '') => { steps.push({ name, ok, detail }); pushLog(`[VPN] test: ${name} ${ok ? 'OK' : 'FAILED'} ${detail}`); };
+  try {
+    if (!IS_LINUX) {
+      step('connect', false, 'Test needs the Linux nordvpn CLI');
+      return res.json({ ok: false, steps });
+    }
+    const info = await vpnInfo();
+    step('logged in', !!info.logged_in, info.account || info.detail);
+    if (!info.logged_in) return res.json({ ok: false, steps });
+
+    const ipBefore = await publicIp();
+    step('public IP (before)', !!ipBefore, ipBefore || 'lookup failed');
+
+    const c = await run('nordvpn', ['connect', country], 60000);
+    const after = await vpnInfo();
+    step('connect', c.ok && after.connected, after.connected ? `${after.country || country}` : c.out.split('\n').pop());
+
+    const ipVpn = after.connected ? await publicIp() : null;
+    step('public IP (on VPN)', !!ipVpn && ipVpn !== ipBefore, ipVpn ? `${ipVpn}${ipVpn === ipBefore ? ' (unchanged)' : ''}` : 'lookup failed');
+
+    const d = await run('nordvpn', ['disconnect'], 30000);
+    const end = await vpnInfo();
+    step('disconnect', d.ok && !end.connected, end.connected ? 'still connected' : '');
+
+    res.json({ ok: steps.every(s => s.ok), steps, ip_before: ipBefore, ip_vpn: ipVpn });
+  } catch (e) {
+    res.status(500).json({ error: e.message, steps });
+  } finally { _vpnTesting = false; }
+});
+
 app.post('/api/vpn/connect', (req, res) => {
   const cfg     = loadCfg();
   const country = req.body?.country || cfg.nordvpn?.country || 'United Kingdom';

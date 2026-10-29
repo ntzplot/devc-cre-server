@@ -285,10 +285,19 @@ tr:last-child td{border-bottom:none}
   <div class="page-head"><div><h1>Network</h1><p>NordVPN controls and proxy.</p></div></div>
   <div class="card">
     <h3>NordVPN</h3>
+    <div class="row"><label class="l">Account</label>
+      <span id="vpnAcct" class="badge b-gray">checking…</span><span class="help" id="vpnAcctDetail"></span>
+      <button class="btn" id="btnVpnRefresh" style="margin-left:auto">Refresh</button></div>
     <div class="row"><label class="l">Access token</label><input type="password" id="vpnToken" placeholder="Paste token…"><button class="btn" id="btnVpnLogin">Login</button></div>
     <div class="row"><label class="l">Country</label><input type="text" id="vpnCountry" placeholder="United Kingdom"></div>
     <div class="btn-row"><button class="btn btn-primary" id="btnVpnOn">Connect</button><button class="btn btn-danger" id="btnVpnOff">Disconnect</button></div>
     <div class="alert alert-green" id="vpnLoginOk"></div><div class="alert alert-red" id="vpnLoginErr"></div>
+  </div>
+  <div class="card">
+    <h3>Connection test</h3>
+    <p class="sub">Checks login, connects, confirms your IP changed, then disconnects.</p>
+    <button class="btn btn-primary" id="btnVpnTest">Run test</button>
+    <div id="vpnTest" style="margin-top:14px"></div>
   </div>
 </section>
 
@@ -610,6 +619,32 @@ $('btnVpnLogin').onclick = async () => {
     if (d.ok) { fl.ok(d.msg || 'Logged in.'); $('vpnToken').value = ''; } else fl.err(d.error);
   } catch (e) { fl.err(e.message); }
 };
+async function loadVpnInfo() {
+  try {
+    const d = await (await fetch('/api/vpn/status')).json();
+    const b = $('vpnAcct');
+    if (d.logged_in === null) { b.className = 'badge b-gray'; b.textContent = 'unknown'; }
+    else if (d.logged_in) { b.className = 'badge b-green'; b.textContent = 'Logged in'; }
+    else { b.className = 'badge b-red'; b.textContent = 'Not logged in'; }
+    $('vpnAcctDetail').textContent = [d.account, d.connected ? `connected${d.country ? ' · ' + d.country : ''}${d.ip ? ' · ' + d.ip : ''}` : '', d.logged_in === false ? d.detail : '']
+      .filter(Boolean).join('  ·  ');
+  } catch { $('vpnAcct').textContent = 'error'; }
+}
+$('btnVpnRefresh').onclick = loadVpnInfo;
+loadVpnInfo();
+$('btnVpnTest').onclick = async () => {
+  const btn = $('btnVpnTest'), out = $('vpnTest');
+  btn.disabled = true; btn.textContent = 'Testing…';
+  out.innerHTML = '<span class="help">Running — this can take up to a minute.</span>';
+  try {
+    const d = await (await fetch('/api/vpn/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ country: $('vpnCountry').value || 'United Kingdom' }) })).json();
+    if (d.error && !d.steps?.length) out.innerHTML = `<div class="alert alert-red show">${esc(d.error)}</div>`;
+    else out.innerHTML = d.steps.map(s => `<div class="reason"><span>${esc(s.name)}${s.detail ? ` <span style="color:var(--muted)">— ${esc(s.detail)}</span>` : ''}</span><span class="badge ${s.ok ? 'b-green' : 'b-red'}">${s.ok ? 'pass' : 'fail'}</span></div>`).join('');
+  } catch (e) { out.innerHTML = `<div class="alert alert-red show">${esc(e.message)}</div>`; }
+  btn.disabled = false; btn.textContent = 'Run test';
+  loadVpnInfo();
+};
+$('btnVpnLogin').addEventListener('click', () => setTimeout(loadVpnInfo, 1500));
 $('btnVpnOn').onclick = () => fetch('/api/vpn/connect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ country: $('vpnCountry').value || 'United Kingdom' }) });
 $('btnVpnOff').onclick = () => fetch('/api/vpn/disconnect', { method: 'POST' });
 
