@@ -239,6 +239,9 @@ app.post('/api/start', (req, res) => {
   if (_proc && _proc.exitCode === null)
     return res.status(400).json({ error: 'already running' });
 
+  if (countCards() === 0)
+    return res.status(400).json({ error: 'No cards available — add some on the Cards page first.' });
+
   const count = parseInt(req.body?.count) || 1;
   const env   = { ...process.env, AUTO_COUNT: String(count) };
   const cwd   = path.join(BASE, 'js');
