@@ -1,7 +1,7 @@
 """
 Playwright automation for xpatfone.com checkout flow.
-Reads emails from emails.csv and processes them one by one.
-Results are appended to success.csv / failed.csv.
+Reads emails from emails.csv (hotmail) or generates Gmail addresses.
+Results appended to success.csv / failed.csv.
 
 Install deps:
     pip install playwright playwright-stealth
@@ -10,9 +10,11 @@ Install deps:
 
 import csv
 import json
+import os
 import random
 import re
 import shutil
+import string as _string
 import subprocess
 import tempfile
 import time
@@ -21,13 +23,16 @@ import urllib.parse
 import urllib.request
 from datetime import datetime
 from pathlib import Path
+
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 from playwright_stealth import Stealth
 
 _stealth = Stealth()
 
-# ── Load config ───────────────────────────────────────────────────────────────
-_cfg = json.loads((Path(__file__).parent / "config.json").read_text(encoding="utf-8-sig"))
+# ── Config ────────────────────────────────────────────────────────────────────
+
+_CONFIG_DIR = Path(__file__).parent.parent / "config"
+_cfg = json.loads((_CONFIG_DIR / "config.json").read_text(encoding="utf-8-sig"))
 
 CF_WORKER_URL           = _cfg["cf_worker_url"]
 CF_EMAILCHECK_URL       = _cfg["cf_emailcheck_url"]
@@ -35,20 +40,17 @@ NORDVPN_ENABLED         = _cfg["nordvpn"].get("enabled", True)
 NORDVPN_COUNTRY         = _cfg["nordvpn"]["country"]
 NORDVPN_RECONNECT_EVERY = _cfg["nordvpn"]["reconnect_every"]
 PROXY_CONFIG            = _cfg["proxy"]
-EMAIL_SOURCE            = _cfg.get("email_source", "hotmail")   # "hotmail" | "gmail"
+EMAIL_SOURCE            = _cfg.get("email_source", "hotmail")
 SMAIL1S_URL             = _cfg.get("smail1s", {}).get("api_url", "https://smail1s.com/get_messages")
 SMAIL1S_MODE            = _cfg.get("smail1s", {}).get("mode", "roundcube")
 GMAIL_API_URL           = _cfg.get("gmail", {}).get("api_url", "https://gmail-token-api.apoh59620.workers.dev/api")
 GMAIL_BASE              = _cfg.get("gmail", {}).get("base", "jokertgolerty")
 GMAIL_DOMAIN            = _cfg.get("gmail", {}).get("domain", "gmail.com")
+ADDRESSES               = _cfg.get("addresses", [])
+DO_MAIL_CHECK           = _cfg.get("do_mail_check", True)
+DO_CANCEL               = _cfg.get("do_cancel", True)
 
-FIRST_NAME = _cfg["billing"]["first_name"]
-LAST_NAME  = _cfg["billing"]["last_name"]
-STREET     = _cfg["billing"]["street"]
-CITY       = _cfg["billing"]["city"]
-STATE      = _cfg["billing"]["state"]
-ZIP        = _cfg["billing"]["zip"]
-# ─────────────────────────────────────────────────────────────────────────────
+# ── Paths ─────────────────────────────────────────────────────────────────────
 
 EMAILS_CSV       = Path("emails.csv")
 SUCCESS_CSV      = Path("success.csv")
@@ -56,13 +58,16 @@ SUCCESS_FULL_CSV = Path("successemailfull.csv")
 FAILED_CSV       = Path("failed.csv")
 CODES_CSV        = Path("codes.csv")
 CARDS_TXT        = Path("cards.txt")
+CANCELLED_CSV    = Path("cancelled.csv")
+CANCEL_FAILED_CSV= Path("cancel_failed.csv")
 
-START_URL = "https://xpatfone.com/pricing"
-IFRAME_ID = "#cb-frame"
-TIMEOUT   = 45_000  # ms
+START_URL   = "https://xpatfone.com/pricing"
+LOGIN_URL   = "https://xpatfone.com/login"
+ACCOUNT_URL = "https://xpatfone.com/account"
+IFRAME_ID   = "#cb-frame"
+TIMEOUT     = 45_000
 
 USE_PROXY = PROXY_CONFIG.get("enabled", True)
-
 
 # ── NordVPN ───────────────────────────────────────────────────────────────────
 
@@ -77,7 +82,6 @@ def _nordvpn_run(*args, timeout=30):
 
 
 def _nordvpn_adapter_up() -> bool:
-    """Return True if the NordLynx/NordVPN adapter is Up."""
     try:
         result = subprocess.run(
             [
@@ -101,8 +105,6 @@ def nordvpn_connect(country: str = NORDVPN_COUNTRY):
     except Exception as e:
         print(f"[NordVPN] Connect error: {e}")
         return
-
-    # Poll adapter status until Up (max 30s)
     for _ in range(15):
         time.sleep(2)
         if _nordvpn_adapter_up():
@@ -118,8 +120,6 @@ def nordvpn_disconnect():
     except Exception as e:
         print(f"[NordVPN] Disconnect error: {e}")
         return
-
-    # Wait until adapter goes down (max 10s)
     for _ in range(5):
         time.sleep(2)
         if not _nordvpn_adapter_up():
@@ -151,13 +151,33 @@ def wait_for_otp(start_time: float, email: str = "default", timeout=90) -> str |
     return None
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# ── Identity picker ───────────────────────────────────────────────────────────
+
+def _load_names(path: Path) -> list[str]:
+    if not path.exists():
+        return []
+    return [l.strip() for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
+
+
+def pick_identity() -> dict:
+    first_names = _load_names(_CONFIG_DIR / "firstname.txt")
+    last_names  = _load_names(_CONFIG_DIR / "lastname.txt")
+    addr = random.choice(ADDRESSES)
+    return {
+        "first":  random.choice(first_names),
+        "last":   random.choice(last_names),
+        "street": addr["street"],
+        "city":   addr["city"],
+        "state":  addr["state"],
+        "zip":    addr["zip"],
+    }
+
+
+# ── CSV helpers ───────────────────────────────────────────────────────────────
 
 class ThreeDSChallengeError(Exception):
     pass
 
-
-# ── CSV helpers ───────────────────────────────────────────────────────────────
 
 def read_emails() -> tuple[list[str], dict[str, str]]:
     emails = []
@@ -236,6 +256,15 @@ def read_cards() -> list[dict]:
     return cards
 
 
+def append_code(email: str, code: str):
+    write_header = not CODES_CSV.exists()
+    with CODES_CSV.open("a", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        if write_header:
+            writer.writerow(["email", "code", "timestamp"])
+        writer.writerow([email, code, datetime.now().strftime("%Y-%m-%d %H:%M:%S")])
+
+
 # ── Browser helpers ───────────────────────────────────────────────────────────
 
 def human_type(locator, text, delay_range=(80, 160)):
@@ -261,6 +290,9 @@ def make_browser(p):
         args=[
             "--disable-blink-features=AutomationControlled",
             "--start-maximized",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--disable-notifications",
         ],
         ignore_default_args=["--enable-automation"],
         no_viewport=True,
@@ -295,10 +327,9 @@ def _handle_3ds(page, kyash_email: str = "default"):
     while time.time() < deadline:
         if page.url.startswith("https://xpatfone.com/thanks/"):
             return
-
         frame = _find_3ds_frame(page)
         if frame:
-            print("  ⚠ 3DS challenge detected — selecting push notification...")
+            print("  ⚠ 3DS detected — selecting push notification...")
             try:
                 start_time = time.time()
                 label = frame.locator('label[for="CredentialId-1a"]')
@@ -306,20 +337,16 @@ def _handle_3ds(page, kyash_email: str = "default"):
                 time.sleep(1.5)
                 label.click()
                 time.sleep(0.5)
-                print("  ✓ Selected push notification radio")
                 btn = frame.locator("#ContinueButton")
                 btn.wait_for(state="visible", timeout=10_000)
                 time.sleep(0.5)
                 btn.click()
-                print("  ✓ Clicked 次へ (Continue)")
                 time.sleep(2.0)
-
-                print("  ⏳ Waiting for OTP from Cloudflare (90s)...")
+                print("  ⏳ Waiting for OTP (90s)...")
                 otp = wait_for_otp(start_time=start_time, email=kyash_email, timeout=90)
                 if not otp:
-                    raise ThreeDSChallengeError("3DS OTP timeout — no code received in 90s")
-
-                print(f"  📲 OTP received: {otp}")
+                    raise ThreeDSChallengeError("3DS OTP timeout — no code in 90s")
+                print(f"  📲 OTP: {otp}")
                 otp_input = frame.locator("#CredentialValidateInput")
                 otp_input.wait_for(state="visible", timeout=10_000)
                 otp_input.fill(otp)
@@ -327,20 +354,17 @@ def _handle_3ds(page, kyash_email: str = "default"):
                 validate_btn = frame.locator("#ValidateButton")
                 validate_btn.wait_for(state="visible", timeout=10_000)
                 validate_btn.click()
-
                 page.wait_for_url("https://xpatfone.com/thanks/", timeout=30_000)
                 return
             except PWTimeout:
                 raise ThreeDSChallengeError("3DS completed but /thanks/ not reached")
-
         time.sleep(1.0)
-
     raise ThreeDSChallengeError("Timed out waiting for /thanks/ or 3DS challenge")
 
 
-# ── Single checkout attempt ───────────────────────────────────────────────────
+# ── Checkout ──────────────────────────────────────────────────────────────────
 
-def checkout(page, email: str, card: dict) -> None:
+def checkout(page, email: str, card: dict, identity: dict) -> None:
     page.goto(START_URL, wait_until="domcontentloaded", timeout=60_000)
     time.sleep(random.uniform(2.0, 3.0))
 
@@ -362,9 +386,9 @@ def checkout(page, email: str, card: dict) -> None:
     time.sleep(2.0)
 
     cb.locator("#first_name").wait_for(state="visible", timeout=TIMEOUT)
-    human_type(cb.locator("#first_name"), FIRST_NAME)
+    human_type(cb.locator("#first_name"), identity["first"])
     time.sleep(0.3)
-    human_type(cb.locator("#last_name"), LAST_NAME)
+    human_type(cb.locator("#last_name"), identity["last"])
     time.sleep(0.3)
     cb.locator("#line1").wait_for(state="visible", timeout=TIMEOUT)
     frame.evaluate(
@@ -374,14 +398,14 @@ def checkout(page, email: str, card: dict) -> None:
             el.dispatchEvent(new Event('input',  { bubbles: true }));
             el.dispatchEvent(new Event('change', { bubbles: true }));
         }""",
-        STREET,
+        identity["street"],
     )
     time.sleep(0.3)
-    human_type(cb.locator("#city"), CITY)
+    human_type(cb.locator("#city"),  identity["city"])
     time.sleep(0.3)
-    human_type(cb.locator("#state"), STATE)
+    human_type(cb.locator("#state"), identity["state"])
     time.sleep(0.3)
-    human_type(cb.locator("#zip"), ZIP)
+    human_type(cb.locator("#zip"),   identity["zip"])
     time.sleep(0.6)
     wait_click(cb.locator('[data-cb-id="address_submit"]'))
     time.sleep(2.5)
@@ -406,7 +430,7 @@ def checkout(page, email: str, card: dict) -> None:
     try:
         cb.locator('[data-cb-id="review_submit"]').wait_for(state="visible", timeout=20_000)
     except PWTimeout:
-        raise ThreeDSChallengeError("3DS challenge triggered after card submission — card retired")
+        raise ThreeDSChallengeError("3DS triggered after card — card retired")
 
     mkt = cb.locator("#cs_email_marketing")
     try:
@@ -423,20 +447,16 @@ def checkout(page, email: str, card: dict) -> None:
 
     time.sleep(0.8)
     wait_click(cb.locator('[data-cb-id="review_submit"]'))
-
     _handle_3ds(page, kyash_email=card.get("kyash_email", "default"))
 
 
 # ── Email generation & inbox polling ─────────────────────────────────────────
 
-import string as _string
-
-GMAIL_MODE      = _cfg.get("gmail", {}).get("email_mode", "both")  # "plus" | "dot" | "both"
-USED_DOTS_FILE  = Path(__file__).parent / "used_dots.txt"
+GMAIL_MODE     = _cfg.get("gmail", {}).get("email_mode", "both")
+USED_DOTS_FILE = Path(__file__).parent / "used_dots.txt"
 
 
 def _dot_variants(base: str) -> list[str]:
-    """All single-dot insertions: j.okertgolerty, jo.kertgolerty, …"""
     return [f"{base[:i]}.{base[i:]}" for i in range(1, len(base))]
 
 
@@ -463,18 +483,15 @@ def generate_email() -> str:
             return email
         if GMAIL_MODE == "dot":
             raise RuntimeError(f"All {len(variants)} dot variants exhausted")
-
-    # plus mode or fallback
     suffix = ''.join(random.choices(_string.ascii_lowercase, k=random.randint(4, 5)))
     return f"{GMAIL_BASE}+{suffix}@{GMAIL_DOMAIN}"
 
 
 def fetch_devyce_code(email: str, credentials: str = "", timeout: int = 120) -> str | None:
-    """Poll inbox for Devyce welcome email. Uses smail1s for hotmail, Gmail API otherwise."""
     deadline = time.time() + timeout
 
     if EMAIL_SOURCE == "hotmail":
-        creds = credentials or email
+        creds   = credentials or email
         payload = json.dumps({"mode": SMAIL1S_MODE, "data": creds}).encode()
         while time.time() < deadline:
             time.sleep(5)
@@ -488,25 +505,23 @@ def fetch_devyce_code(email: str, credentials: str = "", timeout: int = 120) -> 
                 data = json.loads(resp.read())
                 for acct in data.get("data", []):
                     for msg in acct.get("messages", []):
-                        subj = msg.get("subject", "")
                         body = msg.get("message", "")
-                        if "Devyce" in subj or "Xpatfone" in subj or "Login using your code" in body:
-                            code = msg.get("code", "")
-                            if code and re.match(r'^[A-Z0-9]{4,10}$', code):
-                                return code
+                        if "Login using your code" in body:
                             m = re.search(r'Login using your code[:\s\r\n*]+([A-Z0-9]{4,10})', body)
                             if m:
                                 return m.group(1).strip()
+                            code = msg.get("code", "")
+                            if code and re.match(r'^[A-Z0-9]{4,10}$', code):
+                                return code
             except Exception as exc:
                 print(f"  [smail1s poll] {exc}")
         return None
 
-    # Gmail token API
     url = f"{GMAIL_API_URL}/emails?email={urllib.parse.quote(email)}"
     while time.time() < deadline:
         time.sleep(5)
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            req  = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
             resp = urllib.request.urlopen(req, timeout=10)
             data = json.loads(resp.read())
             for msg in data.get("data", {}).get("emails", []):
@@ -519,25 +534,9 @@ def fetch_devyce_code(email: str, credentials: str = "", timeout: int = 120) -> 
     return None
 
 
-def append_code(email: str, code: str):
-    write_header = not CODES_CSV.exists()
-    with CODES_CSV.open("a", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        if write_header:
-            writer.writerow(["email", "code", "timestamp"])
-        writer.writerow([email, code, datetime.now().strftime("%Y-%m-%d %H:%M:%S")])
-
-
-# ── Subscription cancellation ─────────────────────────────────────────────────
-
-LOGIN_URL   = "https://xpatfone.com/login"
-ACCOUNT_URL = "https://xpatfone.com/account"
-CANCELLED_CSV      = Path("cancelled.csv")
-CANCEL_FAILED_CSV  = Path("cancel_failed.csv")
-
+# ── Cancel subscription ───────────────────────────────────────────────────────
 
 def cancel_subscription(p, email: str, code: str) -> None:
-    """Open a fresh browser, log in with email+code, and cancel the subscription."""
     ctx, tmp_dir = make_browser(p)
     page = ctx.new_page()
     try:
@@ -597,36 +596,37 @@ def cancel_subscription(p, email: str, code: str) -> None:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
-def _append_cancel_result(path: Path, email: str, note: str = ""):
-    write_header = not path.exists()
-    with path.open("a", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        if write_header:
-            writer.writerow(["email", "timestamp", "note"])
-        writer.writerow([email, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), note])
-
-
 # ── Main loop ─────────────────────────────────────────────────────────────────
 
 def run():
     vpn_status = f"{NORDVPN_COUNTRY} every {NORDVPN_RECONNECT_EVERY}" if NORDVPN_ENABLED else "OFF"
-    print(f"Source: {EMAIL_SOURCE.upper()} | Proxy: {'ON' if USE_PROXY else 'OFF'} | NordVPN: {vpn_status}\n")
+    print(f"Source: {EMAIL_SOURCE.upper()} | Proxy: {'ON' if USE_PROXY else 'OFF'} | NordVPN: {vpn_status}")
+    print(f"Mail check: {'ON' if DO_MAIL_CHECK else 'OFF'} | Auto-cancel: {'ON' if DO_CANCEL else 'OFF'}")
+    print(f"Addresses: {len(ADDRESSES)} | Names: {len(_load_names(_CONFIG_DIR / 'firstname.txt'))} first / {len(_load_names(_CONFIG_DIR / 'lastname.txt'))} last\n")
 
     done  = already_processed()
     cards = read_cards()
 
+    _auto_count = int(os.environ.get("AUTO_COUNT", "0") or "0")
+
     if EMAIL_SOURCE == "hotmail":
         emails_list, full_lines = read_emails()
         pending = [e for e in emails_list if e not in done]
+        if _auto_count > 0:
+            pending = pending[:_auto_count]
         print(f"Hotmail: {len(emails_list)} total | Done: {len(done)} | Pending: {len(pending)} | Cards: {len(cards)}\n")
     else:
         full_lines: dict[str, str] = {}
-        while True:
-            raw = input("How many emails to generate? ").strip()
-            if raw.isdigit() and int(raw) > 0:
-                count = int(raw)
-                break
-            print("Enter a number greater than 0.")
+        if _auto_count > 0:
+            count = _auto_count
+            print(f"[Auto] Count: {count}")
+        else:
+            while True:
+                raw = input("How many emails to generate? ").strip()
+                if raw.isdigit() and int(raw) > 0:
+                    count = int(raw)
+                    break
+                print("Enter a number greater than 0.")
         print(f"\n[Gmail] Generating {count} emails...")
         pending = []
         for _ in range(count):
@@ -636,7 +636,7 @@ def run():
                     pending.append(email)
             except Exception as exc:
                 print(f"  [Gmail] Generate error: {exc}")
-        print(f"Generated: {len(pending)} fresh emails | Cards: {len(cards)}\n")
+        print(f"Generated: {len(pending)} fresh | Cards: {len(cards)}\n")
 
     if not pending:
         print("Nothing to process.")
@@ -660,41 +660,59 @@ def run():
                     card_idx = candidate
                     break
             if card_idx is None:
-                print("All cards exhausted due to 3DS — stopping.")
+                print("All cards exhausted — stopping.")
                 break
-            card = cards[card_idx]
-            print(f"[{idx}/{len(pending)}] {email}  (card {card_idx + 1}/{len(cards)}: ...{card['number'][-4:]})")
 
-            for attempt in range(1, 4):  # up to 3 attempts per email
+            card     = cards[card_idx]
+            identity = pick_identity()
+            print(
+                f"[{idx}/{len(pending)}] {email}"
+                f"  name: {identity['first']} {identity['last']}"
+                f"  addr: {identity['city']} {identity['zip']}"
+                f"  card: ...{card['number'][-4:]}"
+            )
+
+            for attempt in range(1, 4):
                 ctx, tmp_dir = make_browser(p)
                 page = ctx.new_page()
                 try:
-                    checkout(page, email, card)
+                    checkout(page, email, card, identity)
                     append_result(SUCCESS_CSV, email)
-                    post_success_line(email)
-                    print(f"  ✓ success — fetching Devyce code...")
                     creds = full_lines.get(email, email)
-                    code = fetch_devyce_code(email, credentials=creds)
-                    if code:
-                        append_code(email, code)
-                        print(f"  📧 Code: {code}")
-                        print(f"  🔄 Cancelling subscription...")
-                        try:
-                            cancel_subscription(p, email, code)
-                            _append_cancel_result(CANCELLED_CSV, email)
-                            print(f"  ✓ subscription cancelled\n")
-                        except Exception as cancel_exc:
-                            _append_cancel_result(CANCEL_FAILED_CSV, email, str(cancel_exc).splitlines()[0])
-                            print(f"  ⚠ cancel failed — {cancel_exc}\n")
+                    post_success_line(creds)
+                    print("  ✓ checkout success")
+
+                    if DO_MAIL_CHECK:
+                        print("  📩 Fetching Devyce code...")
+                        code = fetch_devyce_code(email, credentials=creds)
+                        if code:
+                            append_code(email, code)
+                            print(f"  📧 Code: {code}")
+                            if DO_CANCEL:
+                                print("  🔄 Cancelling subscription...")
+                                try:
+                                    cancel_subscription(p, email, code)
+                                    append_result(CANCELLED_CSV, email)
+                                    print("  ✓ cancelled\n")
+                                except Exception as cancel_exc:
+                                    append_result(CANCEL_FAILED_CSV, email, str(cancel_exc).splitlines()[0])
+                                    print(f"  ⚠ cancel failed — {cancel_exc}\n")
+                            else:
+                                print("  ⏭ cancel skipped (do_cancel=false)\n")
+                        else:
+                            print("  ⚠ Code not received within timeout\n")
                     else:
-                        print(f"  ⚠ Code not received within timeout\n")
+                        print("  ⏭ mail check skipped (do_mail_check=false)\n")
+
                     break
+
                 except ThreeDSChallengeError as exc:
                     exhausted.add(card_idx)
                     append_result(FAILED_CSV, email, str(exc))
                     post_failed_line(email)
-                    print(f"  ⚠ 3DS challenge — card {card_idx + 1} retired ({len(exhausted)}/{len(cards)} exhausted)\n")
+                    print(f"  ⚠ 3DS — card {card_idx + 1} retired ({len(exhausted)}/{len(cards)})\n")
                     break
+
                 except Exception as exc:
                     reason = str(exc).splitlines()[0]
                     is_network_err = any(e in reason for e in (
@@ -703,27 +721,29 @@ def run():
                         "ERR_PROXY_CONNECTION_FAILED",
                     ))
                     if is_network_err and attempt < 3:
-                        wait = 8 + attempt * 6  # 14s, then 20s
-                        print(f"  ↻ network error (attempt {attempt}/3) — waiting {wait}s for network to settle...")
+                        wait = 8 + attempt * 6
+                        print(f"  ↻ network error (attempt {attempt}/3) — waiting {wait}s...")
                         if NORDVPN_ENABLED:
                             for _ in range(30):
                                 time.sleep(2)
                                 if _nordvpn_adapter_up():
                                     break
-                        time.sleep(wait)  # extra buffer — lets routes stabilise
-                        print(f"  ↻ retrying now...")
+                        time.sleep(wait)
+                        print("  ↻ retrying...")
                         continue
                     append_result(FAILED_CSV, email, reason)
                     post_failed_line(email)
                     print(f"  ✗ failed — {reason}\n")
                     traceback.print_exc()
                     break
+
                 finally:
                     try:
                         ctx.close()
                     except Exception:
                         pass
                     shutil.rmtree(tmp_dir, ignore_errors=True)
+
             time.sleep(random.uniform(3.0, 6.0))
 
     print("Done.")

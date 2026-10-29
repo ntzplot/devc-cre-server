@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>XPAT Control</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0d0d14;--bg2:#14141f;--card:#1a1a28;--border:#252535;
+  --green:#22c55e;--red:#ef4444;--blue:#3b82f6;--yellow:#eab308;--purple:#a855f7;
+  --text:#e2e8f0;--muted:#64748b;--dim:#94a3b8;
+  --radius:10px;--font:'Segoe UI',system-ui,sans-serif;
+}
+body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:14px;min-height:100vh}
+/* ── header ── */
+header{display:flex;align-items:center;gap:16px;padding:12px 20px;background:var(--bg2);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:100}
+.brand{font-size:18px;font-weight:700;letter-spacing:1px;color:var(--green)}
+.brand span{color:var(--text)}
+header .spacer{flex:1}
+.vpn-pill{display:flex;align-items:center;gap:6px;padding:4px 12px;border-radius:20px;background:var(--card);border:1px solid var(--border);font-size:12px;cursor:default}
+.vpn-pill .dot{width:8px;height:8px;border-radius:50%;background:var(--red);transition:.3s}
+.vpn-pill .dot.on{background:var(--green)}
+#clock{color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums;min-width:60px;text-align:right}
+/* ── layout ── */
+.grid{display:grid;grid-template-columns:260px 1fr 340px;gap:12px;padding:12px;height:calc(100vh - 53px)}
+.col{display:flex;flex-direction:column;gap:12px;overflow-y:auto;min-width:0}
+/* ── cards ── */
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:14px}
+.card h3{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);margin-bottom:12px}
+/* ── stat row ── */
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:12px}
+.stat{background:var(--bg);border-radius:6px;padding:8px;text-align:center}
+.stat .val{font-size:22px;font-weight:700;line-height:1}
+.stat .lbl{font-size:10px;color:var(--muted);margin-top:2px;text-transform:uppercase}
+.stat.green .val{color:var(--green)}
+.stat.red .val{color:var(--red)}
+.stat.blue .val{color:var(--blue)}
+/* ── form rows ── */
+.row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.row label{color:var(--dim);min-width:90px;font-size:12px;flex-shrink:0}
+.row input[type=text],.row input[type=number],.row input[type=time],.row select,.row input[type=password]{
+  flex:1;background:var(--bg);border:1px solid var(--border);border-radius:6px;
+  color:var(--text);padding:6px 10px;font-size:13px;outline:none;min-width:0}
+.row input:focus,.row select:focus{border-color:var(--blue)}
+.row input[type=checkbox]{width:16px;height:16px;accent-color:var(--green);cursor:pointer}
+/* ── buttons ── */
+.btn{border:none;border-radius:6px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;transition:.15s;white-space:nowrap}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn-green{background:var(--green);color:#000}
+.btn-green:hover:not(:disabled){background:#16a34a}
+.btn-red{background:var(--red);color:#fff}
+.btn-red:hover:not(:disabled){background:#dc2626}
+.btn-blue{background:var(--blue);color:#fff}
+.btn-blue:hover:not(:disabled){background:#2563eb}
+.btn-gray{background:var(--border);color:var(--dim)}
+.btn-gray:hover:not(:disabled){background:#333347}
+.btn-purple{background:var(--purple);color:#fff}
+.btn-purple:hover:not(:disabled){background:#9333ea}
+.btn-row{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+/* ── script toggle ── */
+.toggle-group{display:flex;background:var(--bg);border:1px solid var(--border);border-radius:6px;overflow:hidden;margin-bottom:10px}
+.toggle-group button{flex:1;border:none;background:none;color:var(--muted);padding:6px;font-size:12px;font-weight:600;cursor:pointer;transition:.15s}
+.toggle-group button.active{background:var(--blue);color:#fff}
+/* ── upload ── */
+.upload-zone{border:2px dashed var(--border);border-radius:8px;padding:18px;text-align:center;color:var(--muted);font-size:12px;cursor:pointer;transition:.15s;position:relative;margin-bottom:10px}
+.upload-zone:hover,.upload-zone.drag{border-color:var(--blue);color:var(--blue)}
+.upload-zone input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+.upload-zone .icon{font-size:22px;display:block;margin-bottom:4px}
+/* ── section toggle ── */
+.section-head{display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none}
+.section-head .arrow{color:var(--muted);transition:.2s}
+.section-body{overflow:hidden;transition:max-height .2s}
+/* ── logs ── */
+.logs-col{display:flex;flex-direction:column;height:100%;min-height:0}
+.logs-col .card{flex:1;display:flex;flex-direction:column;min-height:0}
+#logBox{flex:1;overflow-y:auto;background:var(--bg);border-radius:6px;padding:10px;font-family:'Consolas','Courier New',monospace;font-size:12px;line-height:1.6;color:#94a3b8;min-height:0}
+#logBox .line{white-space:pre-wrap;word-break:break-all}
+#logBox .line.ok{color:var(--green)}
+#logBox .line.err{color:var(--red)}
+#logBox .line.warn{color:var(--yellow)}
+#logBox .line.info{color:var(--blue)}
+#logBox .line.sep{color:var(--muted);font-style:italic}
+.logs-toolbar{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.logs-toolbar .spacer{flex:1}
+/* ── badge ── */
+.badge{display:inline-block;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:700;text-transform:uppercase}
+.badge-green{background:#052e16;color:var(--green)}
+.badge-red{background:#2d0f0f;color:var(--red)}
+.badge-blue{background:#0e1f40;color:#93c5fd}
+.badge-yellow{background:#2d2000;color:var(--yellow)}
+/* ── alert ── */
+.alert{padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px;display:none}
+.alert-green{background:#052e16;color:var(--green);border:1px solid #166534}
+.alert-red{background:#2d0f0f;color:#fca5a5;border:1px solid #7f1d1d}
+.alert.show{display:block}
+/* ── sched info ── */
+#schedInfo{font-size:11px;color:var(--muted);margin-top:8px}
+/* ── scrollbar ── */
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+/* ── responsive ── */
+@media(max-width:900px){
+  .grid{grid-template-columns:1fr;grid-template-rows:auto auto auto}
+  .logs-col{min-height:300px}
+  #logBox{min-height:250px}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">XPAT <span>Control</span></div>
+  <div class="spacer"></div>
+  <div class="vpn-pill"><div class="dot" id="vpnDot"></div><span id="vpnLabel">VPN: checking…</span></div>
+  <div id="clock">--:--:--</div>
+</header>
+
+<div class="grid">
+
+  <!-- ── LEFT COL ── -->
+  <div class="col">
+
+    <!-- Run control -->
+    <div class="card">
+      <h3>Run Control</h3>
+      <div class="stats" id="statsRow">
+        <div class="stat green"><div class="val" id="sSuccess">0</div><div class="lbl">Success</div></div>
+        <div class="stat red">  <div class="val" id="sFailed">0</div> <div class="lbl">Failed</div></div>
+        <div class="stat blue"> <div class="val" id="sCancelled">0</div><div class="lbl">Cancelled</div></div>
+      </div>
+
+      <div class="toggle-group" id="scriptToggle">
+        <button class="active" data-v="js">JS (Chrome)</button>
+        <button data-v="py">Python</button>
+      </div>
+
+      <div class="row">
+        <label>Quantity</label>
+        <input type="number" id="runCount" value="10" min="1" max="9999">
+      </div>
+
+      <div class="btn-row">
+        <button class="btn btn-green" id="btnStart">▶ Start</button>
+        <button class="btn btn-red"   id="btnStop"  disabled>■ Stop</button>
+      </div>
+      <div id="runStatus" style="font-size:11px;color:var(--muted);margin-top:6px"></div>
+    </div>
+
+    <!-- Schedule -->
+    <div class="card">
+      <h3>Auto Schedule</h3>
+      <div class="row"><label>Start time</label><input type="time" id="schedTime"></div>
+      <div class="row"><label>Quantity</label><input type="number" id="schedCount" value="10" min="1"></div>
+      <div class="row"><label>Script</label>
+        <select id="schedScript">
+          <option value="js">JS (Chrome)</option>
+          <option value="py">Python</option>
+        </select>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-blue"  id="btnSched">Set Schedule</button>
+        <button class="btn btn-gray"  id="btnSchedClear">Clear</button>
+      </div>
+      <div id="schedInfo"></div>
+    </div>
+
+    <!-- VPN -->
+    <div class="card">
+      <h3>NordVPN</h3>
+      <div class="row"><label>Country</label><input type="text" id="vpnCountry" placeholder="United Kingdom"></div>
+      <div class="btn-row">
+        <button class="btn btn-green" id="btnVpnOn">Connect</button>
+        <button class="btn btn-red"   id="btnVpnOff">Disconnect</button>
+      </div>
+    </div>
+
+  </div><!-- end left col -->
+
+  <!-- ── MIDDLE COL ── -->
+  <div class="col">
+
+    <!-- Settings -->
+    <div class="card">
+      <h3>Settings</h3>
+
+      <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Mail &amp; Flags</div>
+
+      <div class="row">
+        <label>Mail source</label>
+        <select id="cfgMailSource">
+          <option value="hotmail">Hotmail</option>
+          <option value="gmail">Gmail</option>
+        </select>
+      </div>
+      <div class="row">
+        <label>Mail check</label>
+        <input type="checkbox" id="cfgMailCheck">
+        <span style="font-size:11px;color:var(--muted)">fetch login code after checkout</span>
+      </div>
+      <div class="row">
+        <label>Auto cancel</label>
+        <input type="checkbox" id="cfgCancel">
+        <span style="font-size:11px;color:var(--muted)">cancel sub after getting code</span>
+      </div>
+
+      <div style="font-size:11px;color:var(--muted);margin:10px 0 8px">Proxy</div>
+      <div class="row">
+        <label>Enable proxy</label>
+        <input type="checkbox" id="cfgProxyOn">
+      </div>
+      <div class="row"><label>Server</label><input type="text" id="cfgProxyServer" placeholder="http://host:port"></div>
+      <div class="row"><label>Username</label><input type="text" id="cfgProxyUser"></div>
+      <div class="row"><label>Password</label><input type="password" id="cfgProxyPass"></div>
+
+      <div style="font-size:11px;color:var(--muted);margin:10px 0 8px">NordVPN config</div>
+      <div class="row">
+        <label>Enable VPN</label>
+        <input type="checkbox" id="cfgVpnOn">
+      </div>
+      <div class="row"><label>Country</label><input type="text" id="cfgVpnCountry" placeholder="United Kingdom"></div>
+      <div class="row"><label>Every N accounts</label><input type="number" id="cfgVpnEvery" value="5" min="1"></div>
+
+      <div class="btn-row">
+        <button class="btn btn-blue" id="btnSaveSettings">Save Settings</button>
+      </div>
+      <div class="alert alert-green" id="settingsOk">Settings saved.</div>
+      <div class="alert alert-red"   id="settingsErr"></div>
+    </div>
+
+    <!-- Emails -->
+    <div class="card">
+      <h3>Emails <span id="emailBadge" class="badge badge-blue" style="margin-left:6px">0 loaded</span></h3>
+
+      <div style="font-size:11px;color:var(--muted);margin-bottom:8px">
+        Upload your <code>emails.txt</code> (one per line, or pipe-separated full lines)
+      </div>
+
+      <div class="upload-zone" id="uploadZone">
+        <span class="icon">📂</span>
+        Drop emails file here or click to browse
+        <input type="file" id="emailFile" accept=".txt,.csv">
+      </div>
+
+      <div class="btn-row">
+        <button class="btn btn-blue" id="btnUpload">Upload</button>
+      </div>
+      <div class="alert alert-green" id="uploadOk"></div>
+      <div class="alert alert-red"   id="uploadErr"></div>
+    </div>
+
+    <!-- Auto Buy -->
+    <div class="card">
+      <h3>Auto Buy <span style="font-size:10px;color:var(--muted)">(codecraftdeveloper.com)</span></h3>
+      <div class="row"><label>Product ID</label><input type="text" id="buyProductId" placeholder="39415"></div>
+      <div class="row"><label>Quantity</label><input type="number" id="buyQty" value="1" min="1"></div>
+      <div class="row"><label>API Key</label><input type="text" id="buyApiKey" placeholder="from config"></div>
+      <div class="btn-row">
+        <button class="btn btn-purple" id="btnBuy">Buy Now</button>
+      </div>
+      <div class="alert alert-green" id="buyOk"></div>
+      <div class="alert alert-red"   id="buyErr"></div>
+      <div id="buyItems" style="margin-top:10px;font-family:monospace;font-size:11px;color:var(--dim);max-height:120px;overflow-y:auto"></div>
+    </div>
+
+  </div><!-- end middle col -->
+
+  <!-- ── RIGHT COL (logs) ── -->
+  <div class="col logs-col">
+    <div class="card" style="flex:1;display:flex;flex-direction:column;min-height:0">
+      <h3>Live Logs</h3>
+      <div class="logs-toolbar">
+        <span id="procBadge" class="badge badge-blue">idle</span>
+        <div class="spacer"></div>
+        <label style="font-size:11px;color:var(--muted);display:flex;align-items:center;gap:4px;cursor:pointer">
+          <input type="checkbox" id="autoScroll" checked style="accent-color:var(--green)"> auto-scroll
+        </label>
+        <button class="btn btn-gray" id="btnClear" style="padding:4px 10px;font-size:11px">Clear</button>
+      </div>
+      <div id="logBox"></div>
+    </div>
+  </div>
+
+</div><!-- end grid -->
+
+<script>
+// ── state ──────────────────────────────────────────────────────────────────
+let logIndex  = 0;
+let running   = false;
+let selScript = 'js';
+let cfg       = {};
+
+// ── clock ──────────────────────────────────────────────────────────────────
+setInterval(() => {
+  document.getElementById('clock').textContent = new Date().toLocaleTimeString('en-GB');
+}, 1000);
+
+// ── log helpers ────────────────────────────────────────────────────────────
+function logClass(msg) {
+  if (/✓|success|cancelled|connected/i.test(msg)) return 'ok';
+  if (/✗|failed|error|exception/i.test(msg)) return 'err';
+  if (/⚠|warning|warn|3ds/i.test(msg)) return 'warn';
+  if (/\[vpn\]|\[auto\]|\[buy\]|\[sched\]/i.test(msg)) return 'info';
+  if (/──/.test(msg)) return 'sep';
+  return '';
+}
+function appendLog(line) {
+  const box = document.getElementById('logBox');
+  const d   = document.createElement('div');
+  d.className = 'line ' + logClass(line.m);
+  d.textContent = `[${line.t}] ${line.m}`;
+  box.appendChild(d);
+  if (box.children.length > 800) box.removeChild(box.firstChild);
+  if (document.getElementById('autoScroll').checked)
+    box.scrollTop = box.scrollHeight;
+}
+
+// ── poll logs ──────────────────────────────────────────────────────────────
+async function pollLogs() {
+  try {
+    const res  = await fetch(`/api/logs?since=${logIndex}`);
+    const data = await res.json();
+    for (const line of (data.lines || [])) {
+      appendLog(line);
+      logIndex = line.i + 1;
+    }
+  } catch {}
+}
+setInterval(pollLogs, 1500);
+
+// ── poll status ────────────────────────────────────────────────────────────
+async function pollStatus() {
+  try {
+    const res  = await fetch('/api/status');
+    const data = await res.json();
+
+    // stats
+    document.getElementById('sSuccess').textContent   = data.success;
+    document.getElementById('sFailed').textContent    = data.failed;
+    document.getElementById('sCancelled').textContent = data.cancelled;
+
+    // email badge
+    const em = data.emails || {};
+    document.getElementById('emailBadge').textContent =
+      `${em.total || 0} loaded · ${em.pending || 0} pending`;
+
+    // running state
+    running = data.running;
+    document.getElementById('btnStart').disabled = running;
+    document.getElementById('btnStop').disabled  = !running;
+    const pb = document.getElementById('procBadge');
+    if (running) { pb.className = 'badge badge-green'; pb.textContent = 'running'; }
+    else         { pb.className = 'badge badge-blue';  pb.textContent = 'idle'; }
+
+    document.getElementById('runStatus').textContent = running
+      ? `Running — success: ${data.success} / failed: ${data.failed}`
+      : (data.success + data.failed > 0 ? `Last run — success: ${data.success} / failed: ${data.failed}` : '');
+
+    // vpn
+    const dot   = document.getElementById('vpnDot');
+    const label = document.getElementById('vpnLabel');
+    dot.className = 'dot ' + (data.vpn_connected ? 'on' : '');
+    label.textContent = data.vpn_connected
+      ? `VPN: ${data.vpn_country}`
+      : 'VPN: off';
+
+    // schedule
+    const si = document.getElementById('schedInfo');
+    if (data.schedule) {
+      si.textContent = `⏰ Scheduled: ${data.schedule.fires_at || data.schedule.time} — ${data.schedule.count} accounts (${data.schedule.script})`;
+      si.style.color = 'var(--yellow)';
+    } else {
+      si.textContent = '';
+    }
+
+    // settings (only load once or after save)
+    if (!cfg._loaded) { loadSettings(data); cfg._loaded = true; }
+  } catch {}
+}
+setInterval(pollStatus, 2500);
+pollStatus();
+
+// ── load settings into form ────────────────────────────────────────────────
+async function loadSettings() {
+  try {
+    const res = await fetch('/api/config');
+    cfg = await res.json();
+    cfg._loaded = true;
+    document.getElementById('cfgMailSource').value = cfg.email_source || 'hotmail';
+    document.getElementById('cfgMailCheck').checked = cfg.do_mail_check !== false;
+    document.getElementById('cfgCancel').checked    = cfg.do_cancel !== false;
+    const p = cfg.proxy || {};
+    document.getElementById('cfgProxyOn').checked   = p.enabled || false;
+    document.getElementById('cfgProxyServer').value = p.server || '';
+    document.getElementById('cfgProxyUser').value   = p.username || '';
+    document.getElementById('cfgProxyPass').value   = p.password || '';
+    const v = cfg.nordvpn || {};
+    document.getElementById('cfgVpnOn').checked     = v.enabled || false;
+    document.getElementById('cfgVpnCountry').value  = v.country || 'United Kingdom';
+    document.getElementById('cfgVpnEvery').value    = v.reconnect_every || 5;
+    document.getElementById('vpnCountry').value     = v.country || 'United Kingdom';
+    const sh = cfg.shop_api || {};
+    document.getElementById('buyProductId').value   = sh.product_id || '';
+    document.getElementById('buyApiKey').value      = sh.api_key || '';
+  } catch {}
+}
+loadSettings();
+
+// ── save settings ──────────────────────────────────────────────────────────
+document.getElementById('btnSaveSettings').onclick = async () => {
+  const ok  = document.getElementById('settingsOk');
+  const err = document.getElementById('settingsErr');
+  ok.classList.remove('show'); err.classList.remove('show');
+  try {
+    const res = await fetch('/api/config');
+    const full = await res.json();
+    full.email_source    = document.getElementById('cfgMailSource').value;
+    full.do_mail_check   = document.getElementById('cfgMailCheck').checked;
+    full.do_cancel       = document.getElementById('cfgCancel').checked;
+    full.proxy = {
+      ...(full.proxy || {}),
+      enabled:  document.getElementById('cfgProxyOn').checked,
+      server:   document.getElementById('cfgProxyServer').value,
+      username: document.getElementById('cfgProxyUser').value,
+      password: document.getElementById('cfgProxyPass').value,
+    };
+    full.nordvpn = {
+      ...(full.nordvpn || {}),
+      enabled:          document.getElementById('cfgVpnOn').checked,
+      country:          document.getElementById('cfgVpnCountry').value,
+      reconnect_every:  parseInt(document.getElementById('cfgVpnEvery').value) || 5,
+    };
+    full.shop_api = {
+      ...(full.shop_api || {}),
+      product_id: document.getElementById('buyProductId').value,
+      api_key:    document.getElementById('buyApiKey').value,
+    };
+    const r = await fetch('/api/config', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(full)
+    });
+    const d = await r.json();
+    if (d.ok) { ok.classList.add('show'); setTimeout(()=>ok.classList.remove('show'),2500); }
+    else { err.textContent = d.error; err.classList.add('show'); }
+  } catch(e) { err.textContent = e.message; err.classList.add('show'); }
+};
+
+// ── script toggle ──────────────────────────────────────────────────────────
+document.getElementById('scriptToggle').onclick = e => {
+  const btn = e.target.closest('button');
+  if (!btn) return;
+  selScript = btn.dataset.v;
+  document.querySelectorAll('#scriptToggle button').forEach(b => b.classList.toggle('active', b===btn));
+};
+
+// ── start / stop ───────────────────────────────────────────────────────────
+document.getElementById('btnStart').onclick = async () => {
+  const count = parseInt(document.getElementById('runCount').value) || 1;
+  try {
+    const r = await fetch('/api/start', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({count, script: selScript})
+    });
+    const d = await r.json();
+    if (!d.ok) alert(d.error);
+  } catch(e) { alert(e.message); }
+};
+
+document.getElementById('btnStop').onclick = async () => {
+  await fetch('/api/stop', {method:'POST'});
+};
+
+// ── clear logs ─────────────────────────────────────────────────────────────
+document.getElementById('btnClear').onclick = () => {
+  document.getElementById('logBox').innerHTML = '';
+};
+
+// ── upload emails ──────────────────────────────────────────────────────────
+const uploadZone = document.getElementById('uploadZone');
+uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('drag'); });
+uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('drag'));
+uploadZone.addEventListener('drop', e => {
+  e.preventDefault(); uploadZone.classList.remove('drag');
+  const f = e.dataTransfer.files[0];
+  if (f) { document.getElementById('emailFile').files; doUpload(f); }
+});
+
+document.getElementById('btnUpload').onclick = () => {
+  const f = document.getElementById('emailFile').files[0];
+  if (!f) { alert('Select a file first.'); return; }
+  doUpload(f);
+};
+
+async function doUpload(file) {
+  const ok  = document.getElementById('uploadOk');
+  const err = document.getElementById('uploadErr');
+  ok.classList.remove('show'); err.classList.remove('show');
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    const r = await fetch('/api/upload/emails', {method:'POST', body:fd});
+    const d = await r.json();
+    if (d.ok) {
+      ok.textContent = `Uploaded ${d.count} emails.`;
+      ok.classList.add('show');
+      setTimeout(()=>ok.classList.remove('show'), 3000);
+    } else {
+      err.textContent = d.error; err.classList.add('show');
+    }
+  } catch(e) { err.textContent = e.message; err.classList.add('show'); }
+}
+
+// ── auto buy ───────────────────────────────────────────────────────────────
+document.getElementById('btnBuy').onclick = async () => {
+  const ok  = document.getElementById('buyOk');
+  const err = document.getElementById('buyErr');
+  const items = document.getElementById('buyItems');
+  ok.classList.remove('show'); err.classList.remove('show');
+  items.innerHTML = '';
+  const qty = parseInt(document.getElementById('buyQty').value) || 1;
+  // save api key / product to config first
+  const apiKey    = document.getElementById('buyApiKey').value;
+  const productId = document.getElementById('buyProductId').value;
+  if (apiKey || productId) {
+    const res = await fetch('/api/config');
+    const full = await res.json();
+    full.shop_api = { ...full.shop_api, api_key: apiKey, product_id: productId };
+    await fetch('/api/config', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(full)});
+  }
+  try {
+    const r = await fetch('/api/buy', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({amount: qty})
+    });
+    const d = await r.json();
+    if (d.ok) {
+      ok.textContent = `Bought ${(d.items||[]).length} items. Trans: ${d.trans_id||''}`;
+      ok.classList.add('show');
+      (d.items||[]).forEach(it => {
+        const div = document.createElement('div');
+        div.textContent = it;
+        div.style.padding = '2px 0';
+        div.style.borderBottom = '1px solid var(--border)';
+        items.appendChild(div);
+      });
+    } else {
+      err.textContent = d.error || d.msg; err.classList.add('show');
+    }
+  } catch(e) { err.textContent = e.message; err.classList.add('show'); }
+};
+
+// ── schedule ───────────────────────────────────────────────────────────────
+document.getElementById('btnSched').onclick = async () => {
+  const time   = document.getElementById('schedTime').value;
+  const count  = parseInt(document.getElementById('schedCount').value) || 1;
+  const script = document.getElementById('schedScript').value;
+  if (!time) { alert('Select a time first.'); return; }
+  try {
+    const r = await fetch('/api/schedule', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({time, count, script})
+    });
+    const d = await r.json();
+    if (d.ok) {
+      document.getElementById('schedInfo').textContent =
+        `⏰ Set — fires at ${d.fires_at} (in ${Math.round(d.delay_seconds/60)}min)`;
+      document.getElementById('schedInfo').style.color = 'var(--yellow)';
+    }
+  } catch(e) { alert(e.message); }
+};
+
+document.getElementById('btnSchedClear').onclick = async () => {
+  await fetch('/api/schedule', {method:'DELETE'});
+  document.getElementById('schedInfo').textContent = '';
+};
+
+// ── vpn buttons ────────────────────────────────────────────────────────────
+document.getElementById('btnVpnOn').onclick = async () => {
+  const country = document.getElementById('vpnCountry').value || 'United Kingdom';
+  await fetch('/api/vpn/connect', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({country})
+  });
+};
+document.getElementById('btnVpnOff').onclick = async () => {
+  await fetch('/api/vpn/disconnect', {method:'POST'});
+};
+</script>
+</body>
+</html>

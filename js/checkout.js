@@ -20,36 +20,38 @@ const { spawnSync } = require('child_process');
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
-const _cfgRaw = fs.readFileSync(path.join(__dirname, 'config.json'), 'utf8').replace(/^\uFEFF/, '');
+const _cfgRaw = fs.readFileSync(path.join(__dirname, '..', 'config', 'config.json'), 'utf8').replace(/^\uFEFF/, '');
 const CFG = JSON.parse(_cfgRaw);
 
-const CF_WORKER    = CFG.cf_worker_url;
-const CF_EMAIL_CHK = CFG.cf_emailcheck_url;
-const PROXY_CFG    = CFG.proxy;
-const NORDVPN_CTRY = CFG.nordvpn.country;
-const NORDVPN_EVERY= CFG.nordvpn.reconnect_every;
+const CF_WORKER     = CFG.cf_worker_url;
+const CF_EMAIL_CHK  = CFG.cf_emailcheck_url;
+const PROXY_CFG     = CFG.proxy;
+const NORDVPN_CTRY  = CFG.nordvpn.country;
+const NORDVPN_EVERY = CFG.nordvpn.reconnect_every;
 const GMAIL_API_URL = CFG.gmail?.api_url ?? 'https://gmail-token-api.apoh59620.workers.dev/api';
-const GMAIL_BASE    = CFG.gmail?.base   ?? 'jokertgolerty';
-const GMAIL_DOMAIN  = CFG.gmail?.domain ?? 'gmail.com';
-
-const { first_name: FIRST_NAME, last_name: LAST_NAME,
-        street: STREET, city: CITY, state: STATE, zip: ZIP } = CFG.billing;
+const GMAIL_BASE    = CFG.gmail?.base    ?? 'jokertgolerty';
+const GMAIL_DOMAIN  = CFG.gmail?.domain  ?? 'gmail.com';
+const DO_MAIL_CHECK = CFG.do_mail_check !== false;
+const DO_CANCEL     = CFG.do_cancel     !== false;
+const ADDRESSES     = CFG.addresses ?? [];
 
 const NORDVPN_EXE = 'C:\\Program Files\\NordVPN\\NordVPN.exe';
 
-const SUCCESS_CSV      = path.join(__dirname, 'success.csv');
-const SUCCESS_FULL_CSV = path.join(__dirname, 'successemailfull.csv');
-const FAILED_CSV       = path.join(__dirname, 'failed.csv');
-const CODES_CSV        = path.join(__dirname, 'codes.csv');
-const CANCELLED_CSV    = path.join(__dirname, 'cancelled.csv');
-const CANCEL_FAILED_CSV= path.join(__dirname, 'cancel_failed.csv');
-const CARDS_TXT        = path.join(__dirname, '..', 'cards.txt');
+const SUCCESS_CSV       = path.join(__dirname, 'success.csv');
+const SUCCESS_FULL_CSV  = path.join(__dirname, 'successemailfull.csv');
+const FAILED_CSV        = path.join(__dirname, 'failed.csv');
+const CODES_CSV         = path.join(__dirname, 'codes.csv');
+const CANCELLED_CSV     = path.join(__dirname, 'cancelled.csv');
+const CANCEL_FAILED_CSV = path.join(__dirname, 'cancel_failed.csv');
+const CARDS_TXT         = path.join(__dirname, '..', 'cards.txt');
+const FIRSTNAME_TXT     = path.join(__dirname, '..', 'config', 'firstname.txt');
+const LASTNAME_TXT      = path.join(__dirname, '..', 'config', 'lastname.txt');
 
-const START_URL  = 'https://xpatfone.com/pricing';
-const LOGIN_URL  = 'https://xpatfone.com/login';
-const ACCOUNT_URL= 'https://xpatfone.com/account';
-const IFRAME_ID  = '#cb-frame';
-const TIMEOUT    = 45_000;
+const START_URL   = 'https://xpatfone.com/pricing';
+const LOGIN_URL   = 'https://xpatfone.com/login';
+const ACCOUNT_URL = 'https://xpatfone.com/account';
+const IFRAME_ID   = '#cb-frame';
+const TIMEOUT     = 45_000;
 
 const NETWORK_ERRORS = [
   'ERR_NETWORK_CHANGED', 'ERR_INTERNET_DISCONNECTED',
@@ -61,8 +63,17 @@ const NETWORK_ERRORS = [
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const rand  = (lo, hi) => Math.floor(Math.random() * (hi - lo + 1)) + lo;
+const pick  = arr => arr[Math.floor(Math.random() * arr.length)];
+
+function loadLines(filePath) {
+  if (!fs.existsSync(filePath)) return [];
+  return fs.readFileSync(filePath, 'utf8')
+    .split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+}
 
 function askCount() {
+  const envN = parseInt(process.env.AUTO_COUNT || '', 10);
+  if (envN > 0) { console.log(`[Auto] Count: ${envN}`); return Promise.resolve(envN); }
   return new Promise(resolve => {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
     const ask = () => rl.question('How many emails to generate? ', ans => {
@@ -78,10 +89,46 @@ function csvEscape(...fields) {
   return fields.map(f => `"${String(f ?? '').replace(/"/g, '""')}"`).join(',');
 }
 
+// ── Random identity picker ────────────────────────────────────────────────────
+
+function pickIdentity() {
+  const firstNames = loadLines(FIRSTNAME_TXT);
+  const lastNames  = loadLines(LASTNAME_TXT);
+  const addr       = pick(ADDRESSES);
+  return {
+    first: pick(firstNames),
+    last:  pick(lastNames),
+    street: addr.street,
+    city:   addr.city,
+    state:  addr.state,
+    zip:    addr.zip,
+  };
+}
+
+// ── Human mouse movement (bezier curve) ──────────────────────────────────────
+
+async function humanMove(page, tx, ty) {
+  const sx  = tx + rand(-220, 220);
+  const sy  = ty + rand(-160, 160);
+  const cpx = (sx + tx) / 2 + rand(-90, 90);
+  const cpy = (sy + ty) / 2 + rand(-70, 70);
+  const steps = rand(18, 34);
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const x = (1 - t) ** 2 * sx + 2 * (1 - t) * t * cpx + t ** 2 * tx;
+    const y = (1 - t) ** 2 * sy + 2 * (1 - t) * t * cpy + t ** 2 * ty;
+    await page.mouse.move(
+      x + (Math.random() - 0.5) * 1.5,
+      y + (Math.random() - 0.5) * 1.5,
+    );
+    await sleep(rand(7, 17));
+  }
+}
+
 // ── Email generation & inbox polling ─────────────────────────────────────────
 
-const GMAIL_MODE      = CFG.gmail?.email_mode ?? 'both'; // "plus" | "dot" | "both"
-const USED_DOTS_FILE  = path.join(__dirname, 'used_dots.txt');
+const GMAIL_MODE     = CFG.gmail?.email_mode ?? 'both';
+const USED_DOTS_FILE = path.join(__dirname, 'used_dots.txt');
 
 function dotVariants(base) {
   const out = [];
@@ -91,7 +138,9 @@ function dotVariants(base) {
 
 function loadUsedDots() {
   if (!fs.existsSync(USED_DOTS_FILE)) return new Set();
-  return new Set(fs.readFileSync(USED_DOTS_FILE, 'utf8').split(/\r?\n/).map(l => l.trim()).filter(Boolean));
+  return new Set(
+    fs.readFileSync(USED_DOTS_FILE, 'utf8').split(/\r?\n/).map(l => l.trim()).filter(Boolean)
+  );
 }
 
 function markDotUsed(email) {
@@ -111,7 +160,6 @@ function generateEmail() {
     }
     if (GMAIL_MODE === 'dot') throw new Error(`All ${variants.length} dot variants exhausted`);
   }
-  // plus mode or fallback
   const chars  = 'abcdefghijklmnopqrstuvwxyz';
   const len    = 4 + Math.floor(Math.random() * 2);
   const suffix = Array.from({ length: len }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
@@ -242,7 +290,7 @@ async function nordvpnDisconnect() {
 // ── OTP poller ────────────────────────────────────────────────────────────────
 
 async function waitForOtp(startTime, email = 'default', timeoutMs = 90_000) {
-  const sinceMs = startTime - 3000;
+  const sinceMs  = startTime - 3000;
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     await sleep(2000);
@@ -254,7 +302,7 @@ async function waitForOtp(startTime, email = 'default', timeoutMs = 90_000) {
       });
       if (res.ok) {
         const data = await res.json();
-        const raw = data.otp || '';
+        const raw  = data.otp || '';
         if (raw) {
           const m = raw.match(/パスワードは(\d{6})に/) || raw.match(/\b(\d{6})\b/);
           return m ? m[1] : raw;
@@ -267,17 +315,46 @@ async function waitForOtp(startTime, email = 'default', timeoutMs = 90_000) {
 
 // ── Browser ───────────────────────────────────────────────────────────────────
 
+// Per-session random seeds for fingerprint noise (regenerated each makeBrowser call)
+function makeFpSeeds() {
+  return {
+    canvasShift: rand(1, 9),
+    webglVendor:  pick(['Intel Inc.', 'Google Inc. (Intel)', 'NVIDIA Corporation', 'AMD']),
+    webglRenderer: pick([
+      'Intel Iris OpenGL Engine',
+      'ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0)',
+      'ANGLE (NVIDIA, NVIDIA GeForce GTX 1060 Direct3D11 vs_5_0 ps_5_0)',
+      'ANGLE (AMD, AMD Radeon RX 580 Direct3D11 vs_5_0 ps_5_0)',
+    ]),
+    audioNoise: (Math.random() * 0.0002 - 0.0001).toFixed(7),
+    hardwareConcurrency: pick([4, 6, 8, 12, 16]),
+    deviceMemory: pick([4, 8, 16]),
+  };
+}
+
 async function makeBrowser(prefix = 'chrome_tmp_') {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  const seeds  = makeFpSeeds();
+
   const opts = {
     headless: false,
     channel: 'chrome',
-    args: ['--disable-blink-features=AutomationControlled', '--start-maximized'],
+    args: [
+      '--disable-blink-features=AutomationControlled',
+      '--start-maximized',
+      '--no-first-run',
+      '--no-default-browser-check',
+      '--disable-notifications',
+      '--disable-popup-blocking',
+      '--metrics-recording-only',
+      '--use-mock-keychain',
+    ],
     ignoreDefaultArgs: ['--enable-automation'],
     viewport: null,
     locale: 'en-GB',
     timezoneId: 'Europe/London',
   };
+
   if (PROXY_CFG.enabled) {
     opts.proxy = {
       server:   PROXY_CFG.server,
@@ -285,9 +362,80 @@ async function makeBrowser(prefix = 'chrome_tmp_') {
       password: PROXY_CFG.password,
     };
   }
+
   const ctx = await chromium.launchPersistentContext(tmpDir, opts);
+
+  // Inject per-session fingerprint spoofing
+  await ctx.addInitScript(({ seeds: s }) => {
+    // webdriver
+    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+
+    // hardware signals
+    Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => s.hardwareConcurrency });
+    Object.defineProperty(navigator, 'deviceMemory',        { get: () => s.deviceMemory });
+    Object.defineProperty(navigator, 'plugins',   { get: () => [1, 2, 3, 4, 5] });
+    Object.defineProperty(navigator, 'languages', { get: () => ['en-GB', 'en'] });
+
+    // chrome object
+    window.chrome = {
+      runtime:    { connect: () => {}, sendMessage: () => {} },
+      loadTimes:  () => ({}),
+      csi:        () => ({}),
+      app:        { isInstalled: false },
+    };
+
+    // Canvas noise — add imperceptible per-session shift to pixel values
+    const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
+    HTMLCanvasElement.prototype.toDataURL = function (...args) {
+      const ctx2d = this.getContext('2d');
+      if (ctx2d) {
+        const img  = ctx2d.getImageData(0, 0, this.width || 1, this.height || 1);
+        img.data[0] = (img.data[0] + s.canvasShift) & 0xff;
+        ctx2d.putImageData(img, 0, 0);
+      }
+      return origToDataURL.apply(this, args);
+    };
+
+    // WebGL vendor / renderer
+    const origGetParam = WebGLRenderingContext.prototype.getParameter;
+    WebGLRenderingContext.prototype.getParameter = function (p) {
+      if (p === 37445) return s.webglVendor;
+      if (p === 37446) return s.webglRenderer;
+      return origGetParam.call(this, p);
+    };
+    const origGetParam2 = WebGL2RenderingContext.prototype.getParameter;
+    WebGL2RenderingContext.prototype.getParameter = function (p) {
+      if (p === 37445) return s.webglVendor;
+      if (p === 37446) return s.webglRenderer;
+      return origGetParam2.call(this, p);
+    };
+
+    // AudioContext noise
+    const origGetChannelData = AudioBuffer.prototype.getChannelData;
+    AudioBuffer.prototype.getChannelData = function (ch) {
+      const data = origGetChannelData.call(this, ch);
+      for (let i = 0; i < data.length; i += 100) {
+        data[i] += parseFloat(s.audioNoise);
+      }
+      return data;
+    };
+
+    // Permissions API — pretend no automation permissions
+    const origQuery = window.Permissions && window.Permissions.prototype.query;
+    if (origQuery) {
+      window.Permissions.prototype.query = function (perm) {
+        if (perm.name === 'notifications') {
+          return Promise.resolve({ state: 'denied', onchange: null });
+        }
+        return origQuery.call(this, perm);
+      };
+    }
+  }, { seeds });
+
   return { ctx, tmpDir };
 }
+
+// ── Browser interaction helpers ───────────────────────────────────────────────
 
 async function humanType(locator, text) {
   await locator.click();
@@ -295,10 +443,21 @@ async function humanType(locator, text) {
   await locator.pressSequentially(text, { delay: rand(80, 160) });
 }
 
-async function waitClick(locator, timeout = TIMEOUT) {
+async function waitClick(locator, timeout = TIMEOUT, page = null) {
   await locator.waitFor({ state: 'visible', timeout });
   await locator.scrollIntoViewIfNeeded();
-  await sleep(rand(400, 900));
+  await sleep(rand(350, 750));
+  if (page) {
+    const box = await locator.boundingBox().catch(() => null);
+    if (box) {
+      const tx = box.x + box.width  * (0.2 + Math.random() * 0.6);
+      const ty = box.y + box.height * (0.2 + Math.random() * 0.6);
+      await humanMove(page, tx, ty);
+      await sleep(rand(40, 110));
+      await page.mouse.click(tx, ty);
+      return;
+    }
+  }
   await locator.click();
 }
 
@@ -358,31 +517,35 @@ async function handle3ds(page, kyashEmail = 'default') {
 
 // ── Checkout ──────────────────────────────────────────────────────────────────
 
-async function checkout(page, email, card) {
+async function checkout(page, email, card, identity) {
   await page.goto(START_URL, { waitUntil: 'domcontentloaded', timeout: 60_000 });
   await sleep(rand(2000, 3000));
 
-  await waitClick(page.locator('[data-cb-type="checkout"][data-cb-plan-id="devyce-solo-xpat-int"]'));
+  await waitClick(
+    page.locator('[data-cb-type="checkout"][data-cb-plan-id="devyce-solo-xpat-int"]'),
+    TIMEOUT, page,
+  );
 
   const iframeEl = await page.waitForSelector(IFRAME_ID, { timeout: TIMEOUT });
   await sleep(2000);
   const cb    = page.frameLocator(IFRAME_ID);
   const frame = await iframeEl.contentFrame();
 
-  await waitClick(cb.locator('[data-cb-id="cart_submit"]'));
+  await waitClick(cb.locator('[data-cb-id="cart_submit"]'), TIMEOUT, page);
   await sleep(1200);
 
   const emailField = cb.locator('#email');
   await emailField.waitFor({ state: 'visible', timeout: TIMEOUT });
   await emailField.fill(email);
   await sleep(600);
-  await waitClick(cb.locator('[data-cb-id="auth_submit"]'));
+  await waitClick(cb.locator('[data-cb-id="auth_submit"]'), TIMEOUT, page);
   await sleep(2000);
 
+  // Billing address
   await cb.locator('#first_name').waitFor({ state: 'visible', timeout: TIMEOUT });
-  await humanType(cb.locator('#first_name'), FIRST_NAME);
+  await humanType(cb.locator('#first_name'), identity.first);
   await sleep(300);
-  await humanType(cb.locator('#last_name'), LAST_NAME);
+  await humanType(cb.locator('#last_name'), identity.last);
   await sleep(300);
   await cb.locator('#line1').waitFor({ state: 'visible', timeout: TIMEOUT });
   await frame.evaluate(v => {
@@ -390,17 +553,18 @@ async function checkout(page, email, card) {
     el.value = v;
     el.dispatchEvent(new Event('input',  { bubbles: true }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
-  }, STREET);
+  }, identity.street);
   await sleep(300);
-  await humanType(cb.locator('#city'),  CITY);
+  await humanType(cb.locator('#city'),  identity.city);
   await sleep(300);
-  await humanType(cb.locator('#state'), STATE);
+  await humanType(cb.locator('#state'), identity.state);
   await sleep(300);
-  await humanType(cb.locator('#zip'),   ZIP);
+  await humanType(cb.locator('#zip'),   identity.zip);
   await sleep(600);
-  await waitClick(cb.locator('[data-cb-id="address_submit"]'));
+  await waitClick(cb.locator('[data-cb-id="address_submit"]'), TIMEOUT, page);
   await sleep(2500);
 
+  // Card details
   const fn = cb.locator('input[autocomplete="cc-given-name"]');
   await fn.waitFor({ state: 'visible', timeout: TIMEOUT });
   await sleep(rand(800, 1500));
@@ -416,7 +580,7 @@ async function checkout(page, email, card) {
   await sleep(rand(400, 800));
   await cb.locator('#cvv').fill(card.cvv);
   await sleep(rand(1000, 2000));
-  await waitClick(cb.locator('[data-cb-id="card_payment_submit"]'));
+  await waitClick(cb.locator('[data-cb-id="card_payment_submit"]'), TIMEOUT, page);
 
   try {
     await cb.locator('[data-cb-id="review_submit"]').waitFor({ state: 'visible', timeout: 20_000 });
@@ -435,7 +599,7 @@ async function checkout(page, email, card) {
   if (!await tos.isChecked()) await tos.check();
 
   await sleep(800);
-  await waitClick(cb.locator('[data-cb-id="review_submit"]'));
+  await waitClick(cb.locator('[data-cb-id="review_submit"]'), TIMEOUT, page);
   await handle3ds(page, card.kyash_email);
 }
 
@@ -452,14 +616,22 @@ async function cancelSubscription(email, code) {
     await emailField.waitFor({ state: 'visible', timeout: TIMEOUT });
     await emailField.fill(email);
     await sleep(500);
-    await page.locator('button[type="submit"], input[type="submit"]').first().click();
+    await waitClick(
+      page.locator('button[type="submit"], input[type="submit"]').first(),
+      TIMEOUT, page,
+    );
     await sleep(2000);
 
-    const codeField = page.locator('input[type="text"], input[name="code"], input[placeholder*="code" i]').first();
+    const codeField = page.locator(
+      'input[type="text"], input[name="code"], input[placeholder*="code" i]'
+    ).first();
     await codeField.waitFor({ state: 'visible', timeout: TIMEOUT });
     await humanType(codeField, code);
     await sleep(500);
-    await page.locator('button[type="submit"], input[type="submit"]').first().click();
+    await waitClick(
+      page.locator('button[type="submit"], input[type="submit"]').first(),
+      TIMEOUT, page,
+    );
     await sleep(3000);
 
     await page.goto(ACCOUNT_URL, { waitUntil: 'domcontentloaded', timeout: 60_000 });
@@ -469,23 +641,23 @@ async function cancelSubscription(email, code) {
       'a:has-text("Cancel"), button:has-text("Cancel subscription"), ' +
       'a:has-text("Manage subscription"), a:has-text("Cancel plan")'
     ).first();
-    await cancelBtn.waitFor({ state: 'visible', timeout: TIMEOUT });
-    await cancelBtn.click();
+    await waitClick(cancelBtn, TIMEOUT, page);
     await sleep(2000);
 
     try {
       const confirm = page.locator(
-        'button:has-text("Confirm"), button:has-text("Yes, cancel"), button:has-text("Cancel subscription")'
+        'button:has-text("Confirm"), button:has-text("Yes, cancel"), ' +
+        'button:has-text("Cancel subscription")'
       ).first();
       await confirm.waitFor({ state: 'visible', timeout: 10_000 });
-      await confirm.click();
+      await waitClick(confirm, 10_000, page);
       await sleep(2000);
     } catch {}
 
     try {
       await page.waitForSelector(
         ':text("cancelled"), :text("Cancelled"), :text("subscription has been cancelled")',
-        { timeout: 15_000 }
+        { timeout: 15_000 },
       );
     } catch {
       throw new Error('Cancellation confirmation not found on page');
@@ -499,21 +671,23 @@ async function cancelSubscription(email, code) {
 // ── Main loop ─────────────────────────────────────────────────────────────────
 
 async function run() {
-  console.log(`Proxy: ${PROXY_CFG.enabled ? 'ON' : 'OFF'} | NordVPN: ${NORDVPN_CTRY} every ${NORDVPN_EVERY}\n`);
+  console.log(`Proxy: ${PROXY_CFG.enabled ? 'ON' : 'OFF'} | NordVPN: ${NORDVPN_CTRY} every ${NORDVPN_EVERY}`);
+  console.log(`Mail check: ${DO_MAIL_CHECK ? 'ON' : 'OFF'} | Auto-cancel: ${DO_CANCEL ? 'ON' : 'OFF'}`);
+  console.log(`Addresses loaded: ${ADDRESSES.length} | Names: ${loadLines(FIRSTNAME_TXT).length} first / ${loadLines(LASTNAME_TXT).length} last\n`);
 
   const count = await askCount();
   const done  = alreadyProcessed();
   const cards = readCards();
 
-  console.log(`\n[GPTMail] Generating ${count} emails...`);
+  console.log(`\n[Mail] Generating ${count} emails...`);
   const pending = [];
   for (let i = 0; i < count; i++) {
     try {
-      const email = await generateEmail();
+      const email = generateEmail();
       if (!done.has(email)) pending.push(email);
       await sleep(350);
     } catch (e) {
-      console.log(`[GPTMail] Generate error: ${e.message}`);
+      console.log(`[Mail] Generate error: ${e.message}`);
       await sleep(2000);
     }
   }
@@ -525,8 +699,9 @@ async function run() {
   const exhausted = new Set();
 
   for (let idx = 0; idx < pending.length; idx++) {
-    const num   = idx + 1;
-    const email = pending[idx];
+    const num      = idx + 1;
+    const email    = pending[idx];
+    const identity = pickIdentity();
 
     if (num > 1 && (num - 1) % NORDVPN_EVERY === 0) {
       await nordvpnDisconnect();
@@ -541,37 +716,52 @@ async function run() {
     if (cardIdx === null) { console.log('All cards exhausted — stopping.'); break; }
 
     const card = cards[cardIdx];
-    console.log(`[${num}/${pending.length}] ${email}  (card ${cardIdx + 1}/${cards.length}: ...${card.number.slice(-4)})`);
+    console.log(
+      `[${num}/${pending.length}] ${email}` +
+      `  name: ${identity.first} ${identity.last}` +
+      `  addr: ${identity.city} ${identity.zip}` +
+      `  card: ...${card.number.slice(-4)}`
+    );
 
     for (let attempt = 1; attempt <= 3; attempt++) {
       const { ctx, tmpDir } = await makeBrowser();
       const page = await ctx.newPage();
       try {
-        await checkout(page, email, card);
+        await checkout(page, email, card, identity);
         appendResult(SUCCESS_CSV, email);
         await postSuccessLine(email);
-        console.log('  ✓ success — fetching Devyce code...');
+        console.log('  ✓ checkout success');
 
-        const code = await fetchDevyceCode(email);
-        if (code) {
-          appendCode(email, code);
-          console.log(`  📧 Code: ${code}`);
-          console.log('  🔄 Cancelling subscription...');
-          try {
-            await cancelSubscription(email, code);
-            appendResult(CANCELLED_CSV, email);
-            console.log('  ✓ subscription cancelled\n');
-          } catch (e) {
-            appendResult(CANCEL_FAILED_CSV, email, e.message.split('\n')[0]);
-            console.log(`  ⚠ cancel failed — ${e.message}\n`);
+        if (DO_MAIL_CHECK) {
+          console.log('  📩 Fetching Devyce code...');
+          const code = await fetchDevyceCode(email);
+          if (code) {
+            appendCode(email, code);
+            console.log(`  📧 Code: ${code}`);
+            if (DO_CANCEL) {
+              console.log('  🔄 Cancelling subscription...');
+              try {
+                await cancelSubscription(email, code);
+                appendResult(CANCELLED_CSV, email);
+                console.log('  ✓ cancelled\n');
+              } catch (e) {
+                appendResult(CANCEL_FAILED_CSV, email, e.message.split('\n')[0]);
+                console.log(`  ⚠ cancel failed — ${e.message}\n`);
+              }
+            } else {
+              console.log('  ⏭ cancel skipped (do_cancel=false)\n');
+            }
+          } else {
+            console.log('  ⚠ Code not received within timeout\n');
           }
         } else {
-          console.log('  ⚠ Code not received within timeout\n');
+          console.log('  ⏭ mail check skipped (do_mail_check=false)\n');
         }
+
         break;
 
       } catch (err) {
-        const reason = err.message.split('\n')[0];
+        const reason    = err.message.split('\n')[0];
         const isNetwork = NETWORK_ERRORS.some(e => reason.includes(e));
 
         if (err instanceof ThreeDSError) {
@@ -590,7 +780,7 @@ async function run() {
             if (nordvpnAdapterUp()) break;
           }
           await sleep(waitMs);
-          console.log('  ↻ retrying now...');
+          console.log('  ↻ retrying...');
           continue;
         }
 
@@ -610,10 +800,10 @@ async function run() {
   }
 
   console.log('\nDone.');
-  console.log(`  Success    → ${SUCCESS_CSV}`);
-  console.log(`  Failed     → ${FAILED_CSV}`);
-  console.log(`  Codes      → ${CODES_CSV}`);
-  console.log(`  Cancelled  → ${CANCELLED_CSV}`);
+  console.log(`  Success   → ${SUCCESS_CSV}`);
+  console.log(`  Failed    → ${FAILED_CSV}`);
+  console.log(`  Codes     → ${CODES_CSV}`);
+  console.log(`  Cancelled → ${CANCELLED_CSV}`);
 }
 
 run().catch(err => {

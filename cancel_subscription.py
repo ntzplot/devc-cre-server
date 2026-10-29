@@ -24,7 +24,7 @@ from playwright_stealth import Stealth
 _stealth = Stealth()
 
 # ── Load config ───────────────────────────────────────────────────────────────
-_cfg = json.loads((Path(__file__).parent / "config.json").read_text(encoding="utf-8"))
+_cfg = json.loads((Path(__file__).parent / "config" / "config.json").read_text(encoding="utf-8"))
 
 NORDVPN_COUNTRY         = _cfg["nordvpn"]["country"]
 NORDVPN_RECONNECT_EVERY = _cfg["nordvpn"]["reconnect_every"]

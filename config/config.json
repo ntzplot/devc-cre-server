@@ -1,0 +1,64 @@
+{
+  "cf_worker_url": "https://yashotpreceiver.apoh59620.workers.dev",
+  "cf_emailcheck_url": "https://yashemailchecker.apoh59620.workers.dev",
+
+  "email_source": "hotmail",
+
+  "smail1s": {
+    "api_url": "https://smail1s.com/get_messages",
+    "mode": "oauth"
+  },
+
+  "gmail": {
+    "api_url": "https://gmail-token-api.apoh59620.workers.dev/api",
+    "base": "jokertgolerty",
+    "domain": "gmail.com",
+    "email_mode": "both"
+  },
+
+  "nordvpn": {
+    "enabled": false,
+    "country": "United Kingdom",
+    "reconnect_every": 5
+  },
+
+  "proxy": {
+    "enabled": false,
+    "server": "http://global.rotgb.trustsource.live:10000",
+    "username": "USER254693-zone-custom-region-GB",
+    "password": "fecc75"
+  },
+
+  "addresses": [
+    { "street": "Athlone St",         "city": "Leeds",              "state": "West Yorkshire",        "zip": "LS12 1UB" },
+    { "street": "Walkergate",          "city": "Durham",             "state": "County Durham",          "zip": "DH1 1SQ"  },
+    { "street": "43 Parker Ln",        "city": "Burnley",            "state": "Lancashire",             "zip": "BB11 2BU" },
+    { "street": "30 York Pl",          "city": "Brighton",           "state": "East Sussex",            "zip": "BN1 4GU"  },
+    { "street": "Dedworth Rd",         "city": "Windsor",            "state": "Windsor and Maidenhead", "zip": "SL4 4JT"  },
+    { "street": "442C Cowbridge Rd E", "city": "Cardiff",            "state": "South Glamorgan",        "zip": "CF5 1JN"  },
+    { "street": "Alexandra Rd",        "city": "Penzance",           "state": "Cornwall",               "zip": "TR18 4LZ" },
+    { "street": "3 Armour St",         "city": "Kilmarnock",         "state": "East Ayrshire",          "zip": "KA1 3HT"  },
+    { "street": "1 Cundall Rd",        "city": "Hartlepool",         "state": "Cleveland",              "zip": "TS26 8LQ" },
+    { "street": "High St",             "city": "Winterbourne Stoke", "state": "Wiltshire",              "zip": "SP3 4SZ"  },
+    { "street": "W High Down",         "city": "Totland Bay",        "state": "Isle of Wight",          "zip": "PO39 0JH" },
+    { "street": "28 Tombland",         "city": "Norwich",            "state": "Norfolk",                "zip": "NR3 1RE"  },
+    { "street": "7 Merryland",         "city": "St Ives",            "state": "Cambridgeshire",         "zip": "PE27 5ED" },
+    { "street": "14 Five Acre Wood",   "city": "High Wycombe",       "state": "Bucks",                  "zip": "HP12 4LD" },
+    { "street": "251 Northolt Rd",     "city": "Harrow",             "state": "Middlesex",              "zip": "HA2 8HR"  },
+    { "street": "70 Hamilton Rd",      "city": "Motherwell",         "state": "Lanarkshire",            "zip": "ML1 3BY"  },
+    { "street": "167 Morrison St",     "city": "Edinburgh",          "state": "City of Edinburgh",      "zip": "EH3 8AG"  },
+    { "street": "1 High St",           "city": "Corsham",            "state": "Wiltshire",              "zip": "SN13 0ES" },
+    { "street": "8 Harrison St",       "city": "Leeds",              "state": "West Yorkshire",         "zip": "LS1 6PA"  },
+    { "street": "18 Braemar Rd",       "city": "Sutton Coldfield",   "state": "West Midlands",          "zip": "B73 6LN"  },
+    { "street": "62 Station Rd",       "city": "Addlestone",         "state": "Surrey",                 "zip": "KT15 2AF" }
+  ],
+
+  "do_mail_check": false,
+  "do_cancel": true,
+
+  "shop_api": {
+    "base_url": "https://codecraftdeveloper.com/api",
+    "api_key": "55f978c1d7546bb26803cb09fee9e768",
+    "product_id": "39415"
+  }
+}
