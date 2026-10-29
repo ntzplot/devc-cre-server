@@ -90,7 +90,7 @@ function vpnUp() {
   try {
     if (IS_LINUX) {
       const out = execSync('nordvpn status 2>&1', { timeout: 8000, encoding: 'utf8' });
-      return /Connected/i.test(out);
+      return /Status:s*Connected/i.test(out);
     }
     const out = execSync(
       `powershell -NoProfile -Command "Get-NetAdapter | Where-Object { $_.Name -like 'Nord*' -or $_.InterfaceDescription -like 'Nord*' } | Select-Object -ExpandProperty Status"`,
