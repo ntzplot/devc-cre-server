@@ -224,9 +224,12 @@ app.post('/api/start', (req, res) => {
   const cwd   = path.join(BASE, 'js');
 
   try {
-    const proc = spawn('node', [path.join(cwd, 'checkout.js')], {
-      cwd, env, stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    // Linux VPS: run the server variant inside a virtual display so real (headed) Chrome works
+    const [cmd, args] = IS_LINUX
+      ? ['xvfb-run', ['-a', '--server-args=-screen 0 1920x1080x24', 'node', path.join(cwd, 'checkout-server.js')]]
+      : ['node', [path.join(cwd, 'checkout.js')]];
+    const proc = spawn(cmd, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] });
+    proc.on('error', e => pushLog(`✗ failed to launch (${cmd}): ${e.message}`));
     _proc   = proc;
     _logs   = [];
     _logIdx = 0;
