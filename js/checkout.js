@@ -71,6 +71,13 @@ function loadLines(filePath) {
     .split(/\r?\n/).map(l => l.trim()).filter(Boolean);
 }
 
+// Hotmail pool (shared with the dashboard): email|password|token per line
+const EMAIL_SOURCE = CFG.email_source ?? 'gmail';
+const EMAILS_CSV   = path.join(__dirname, '..', '1', 'emails.csv');
+function readHotmail() {
+  return loadLines(EMAILS_CSV).filter(l => !l.startsWith('#')).map(l => l.split('|')[0].trim()).filter(Boolean);
+}
+
 function askCount() {
   const envN = parseInt(process.env.AUTO_COUNT || '', 10);
   if (envN > 0) { console.log(`[Auto] Count: ${envN}`); return Promise.resolve(envN); }
@@ -679,19 +686,26 @@ async function run() {
   const done  = alreadyProcessed();
   const cards = readCards();
 
-  console.log(`\n[Mail] Generating ${count} emails...`);
-  const pending = [];
-  for (let i = 0; i < count; i++) {
-    try {
-      const email = generateEmail();
-      if (!done.has(email)) pending.push(email);
-      await sleep(350);
-    } catch (e) {
-      console.log(`[Mail] Generate error: ${e.message}`);
-      await sleep(2000);
+  let pending = [];
+  if (EMAIL_SOURCE === 'hotmail') {
+    const pool = readHotmail();
+    pending = pool.filter(e => !done.has(e)).slice(0, count);
+    console.log(`\n[Hotmail] ${pool.length} in pool | ${pending.length} to process | Cards: ${cards.length}\n`);
+    if (DO_MAIL_CHECK) console.log('[Hotmail] mail check is not supported in the JS checkout - skipping login-code fetch');
+  } else {
+    console.log(`\n[Mail] Generating ${count} emails...`);
+    for (let i = 0; i < count; i++) {
+      try {
+        const email = generateEmail();
+        if (!done.has(email)) pending.push(email);
+        await sleep(350);
+      } catch (e) {
+        console.log(`[Mail] Generate error: ${e.message}`);
+        await sleep(2000);
+      }
     }
+    console.log(`Generated: ${pending.length} fresh emails | Cards: ${cards.length}\n`);
   }
-  console.log(`Generated: ${pending.length} fresh emails | Cards: ${cards.length}\n`);
   if (!pending.length) { console.log('Nothing to process.'); return; }
 
   await nordvpnConnect();
@@ -732,7 +746,7 @@ async function run() {
         await postSuccessLine(email);
         console.log('  ✓ checkout success');
 
-        if (DO_MAIL_CHECK) {
+        if (DO_MAIL_CHECK && EMAIL_SOURCE !== 'hotmail') {
           console.log('  📩 Fetching Devyce code...');
           const code = await fetchDevyceCode(email);
           if (code) {

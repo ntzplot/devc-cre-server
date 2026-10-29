@@ -22,9 +22,9 @@ const CFG_PATH      = path.join(BASE, 'config', 'config.json');
 const EMAILS_CSV    = path.join(BASE, '1', 'emails.csv');
 const CARDS_TXT     = path.join(BASE, 'cards.txt');   // same file checkout*.js reads
 const OLD_CARDS_TXT = path.join(BASE, '1', 'cards.txt');
-const SUCCESS_CSV   = path.join(BASE, '1', 'success.csv');
-const FAILED_CSV    = path.join(BASE, '1', 'failed.csv');
-const CANCELLED_CSV = path.join(BASE, '1', 'cancelled.csv');
+const SUCCESS_CSV   = path.join(BASE, 'js', 'success.csv');
+const FAILED_CSV    = path.join(BASE, 'js', 'failed.csv');
+const CANCELLED_CSV = path.join(BASE, 'js', 'cancelled.csv');
 const PURCHASED_TXT = path.join(BASE, 'purchased.txt');
 const IS_LINUX      = process.platform === 'linux';
 const vpnCountryArg = c => String(c).trim().replace(/\s+/g, '_');   // Linux CLI wants United_Kingdom
