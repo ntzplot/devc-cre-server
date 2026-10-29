@@ -20,7 +20,8 @@ const upload = multer({ storage: multer.memoryStorage() });
 const BASE          = path.join(__dirname, '..');
 const CFG_PATH      = path.join(BASE, 'config', 'config.json');
 const EMAILS_CSV    = path.join(BASE, '1', 'emails.csv');
-const CARDS_TXT     = path.join(BASE, '1', 'cards.txt');
+const CARDS_TXT     = path.join(BASE, 'cards.txt');   // same file checkout*.js reads
+const OLD_CARDS_TXT = path.join(BASE, '1', 'cards.txt');
 const SUCCESS_CSV   = path.join(BASE, '1', 'success.csv');
 const FAILED_CSV    = path.join(BASE, '1', 'failed.csv');
 const CANCELLED_CSV = path.join(BASE, '1', 'cancelled.csv');
@@ -47,6 +48,9 @@ function dockerWorker() {
 function nordCmd(args) {
   return dockerWorker() ? ['docker', ['exec', WORKER, 'nordvpn', ...args]] : ['nordvpn', args];
 }
+
+// one-time move: older versions kept cards in 1/cards.txt
+try { if (!fs.existsSync(CARDS_TXT) && fs.existsSync(OLD_CARDS_TXT)) fs.copyFileSync(OLD_CARDS_TXT, CARDS_TXT); } catch {}
 
 // ── State ──────────────────────────────────────────────────────────────────
 let _proc     = null;
