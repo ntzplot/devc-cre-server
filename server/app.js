@@ -25,7 +25,8 @@ const SUCCESS_CSV   = path.join(BASE, '1', 'success.csv');
 const FAILED_CSV    = path.join(BASE, '1', 'failed.csv');
 const CANCELLED_CSV = path.join(BASE, '1', 'cancelled.csv');
 const PURCHASED_TXT = path.join(BASE, 'purchased.txt');
-const NORDVPN_EXE   = 'C:\\Program Files\\NordVPN\\NordVPN.exe';
+const IS_LINUX      = process.platform === 'linux';
+const NORDVPN_EXE   = IS_LINUX ? 'nordvpn' : 'C:\\Program Files\\NordVPN\\NordVPN.exe';
 
 // ── State ──────────────────────────────────────────────────────────────────
 let _proc     = null;
@@ -86,6 +87,10 @@ function countCards() {
 
 function vpnUp() {
   try {
+    if (IS_LINUX) {
+      const out = execSync('nordvpn status 2>&1', { timeout: 8000, encoding: 'utf8' });
+      return /Connected/i.test(out);
+    }
     const out = execSync(
       `powershell -NoProfile -Command "Get-NetAdapter | Where-Object { $_.Name -like 'Nord*' -or $_.InterfaceDescription -like 'Nord*' } | Select-Object -ExpandProperty Status"`,
       { timeout: 8000, encoding: 'utf8' }
@@ -254,13 +259,15 @@ app.delete('/api/schedule', (req, res) => {
 app.post('/api/vpn/connect', (req, res) => {
   const cfg     = loadCfg();
   const country = req.body?.country || cfg.nordvpn?.country || 'United Kingdom';
-  spawn(NORDVPN_EXE, ['-c', '-g', country], { detached: true, stdio: 'ignore' });
+  const args    = IS_LINUX ? ['connect', country] : ['-c', '-g', country];
+  spawn(NORDVPN_EXE, args, { detached: true, stdio: 'ignore' });
   pushLog(`[VPN] Connecting to ${country}...`);
   res.json({ ok: true });
 });
 
 app.post('/api/vpn/disconnect', (req, res) => {
-  spawn(NORDVPN_EXE, ['-d'], { detached: true, stdio: 'ignore' });
+  const args = IS_LINUX ? ['disconnect'] : ['-d'];
+  spawn(NORDVPN_EXE, args, { detached: true, stdio: 'ignore' });
   pushLog('[VPN] Disconnecting...');
   res.json({ ok: true });
 });
