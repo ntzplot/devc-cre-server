@@ -146,6 +146,7 @@ tr:last-child td{border-bottom:none}
     <div class="nav-label">Data</div>
     <a data-s="emails"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><polyline points="3 7 12 13 21 7"/></svg>Emails<span class="count" id="cEmails"></span></a>
     <a data-s="records"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg>Records</a>
+    <a data-s="cards"><svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>Cards<span class="count" id="cCards"></span></a>
     <a data-s="buy"><svg viewBox="0 0 24 24"><circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/><path d="M2 3h3l2.7 12.4a1 1 0 0 0 1 .8h8.8a1 1 0 0 0 1-.8L20 7H6"/></svg>Auto Buy</a>
     <div class="nav-label">Configure</div>
     <a data-s="schedule"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>Schedule</a>
@@ -255,13 +256,42 @@ tr:last-child td{border-bottom:none}
   </div>
 </section>
 
+<!-- ═══════ CARDS ═══════ -->
+<section id="s-cards">
+  <div class="page-head"><div><h1>Cards</h1><p>Manage the cards available to the checkout. Numbers are masked.</p></div>
+    <span id="cardBadge" class="badge b-blue">0 cards</span></div>
+  <div class="card">
+    <h3>Add cards</h3>
+    <p class="sub">One per line: first|last|number|mm|yy|cvv|tag — duplicates are skipped.</p>
+    <textarea id="cardText" rows="4" placeholder="Henry|Kelvin|4111111111111111|01|28|123|tag" style="width:100%;border:1px solid var(--border2);border-radius:8px;padding:10px 12px;font-family:Consolas,monospace;font-size:12px;outline:none;resize:vertical"></textarea>
+    <div class="btn-row"><button class="btn btn-primary" id="btnCardAdd">Add cards</button></div>
+    <div class="alert alert-green" id="cardOk"></div><div class="alert alert-red" id="cardErr"></div>
+  </div>
+  <div class="card">
+    <div class="toolbar"><input type="text" id="cardSearch" placeholder="Search name or last 4…">
+      <div class="spacer"></div><button class="btn btn-danger" id="btnCardDel" disabled>Delete selected</button></div>
+    <div id="cardTable"></div>
+  </div>
+</section>
+
 <!-- ═══════ BUY ═══════ -->
 <section id="s-buy">
-  <div class="page-head"><div><h1>Auto Buy</h1><p>Purchase accounts from codecraftdeveloper.com.</p></div></div>
+  <div class="page-head"><div><h1>Auto Buy</h1><p>Buy cards from codecraftdeveloper.com — automatically during a run, or manually.</p></div>
+    <button class="btn btn-primary" id="btnSaveAutoBuy">Save</button></div>
   <div class="card">
+    <h3>Automatic</h3>
+    <p class="sub">While a run is going, new cards are bought and added to cards.txt whenever the unused cards drop to the minimum.</p>
+    <div class="row"><label class="l">Auto-buy during run</label><input type="checkbox" id="abOn"></div>
+    <div class="row"><label class="l">Buy when cards ≤</label><input type="number" id="abMin" value="2" min="0" style="max-width:120px;flex:none"><span class="help">unused cards left</span></div>
+    <div class="row"><label class="l">Cards per purchase</label><input type="number" id="abAmount" value="5" min="1" style="max-width:120px;flex:none"></div>
+    <div class="row"><label class="l">Cards in stock</label><span id="abStock" class="badge b-blue">0</span></div>
+    <div class="alert alert-green" id="abOk">Saved.</div><div class="alert alert-red" id="abErr"></div>
+  </div>
+  <div class="card">
+    <h3>Manual</h3>
+    <div class="row"><label class="l">API key</label><input type="password" id="buyApiKey" placeholder="from config"></div>
     <div class="row"><label class="l">Product ID</label><input type="text" id="buyProductId" placeholder="39415"></div>
     <div class="row"><label class="l">Quantity</label><input type="number" id="buyQty" value="1" min="1"></div>
-    <div class="row"><label class="l">API key</label><input type="password" id="buyApiKey" placeholder="from config"></div>
     <div class="btn-row"><button class="btn btn-primary" id="btnBuy">Buy now</button></div>
     <div class="alert alert-green" id="buyOk"></div><div class="alert alert-red" id="buyErr"></div>
     <div id="buyItems" style="margin-top:12px;font-family:Consolas,monospace;font-size:12px;color:var(--dim);max-height:200px;overflow-y:auto"></div>
@@ -342,6 +372,7 @@ function show(name) {
   if (name === 'dashboard') loadStats();
   if (name === 'emails') loadEmails();
   if (name === 'records') loadRecords();
+  if (name === 'cards') loadCards();
 }
 $('nav').onclick = e => { const a = e.target.closest('a'); if (a) show(a.dataset.s); };
 
@@ -384,6 +415,7 @@ async function pollStatus() {
     $('kFailed').textContent = d.failed;
     $('kCancelled').textContent = d.cancelled;
     $('kCards').textContent = d.cards ?? 0;
+    $('abStock').textContent = d.cards ?? 0;
     const tot = d.success + d.failed;
     $('kRate').textContent = tot ? `${Math.round(d.success / tot * 100)}% success rate` : 'no runs yet';
 
@@ -499,6 +531,45 @@ $('recTabs').onclick = e => {
   loadRecords();
 };
 
+// ── cards ──────────────────────────────────────────────────────────────────
+const cardState = { page: 0, all: [], sel: new Set(), redraw: drawCards };
+async function loadCards() {
+  try { cardState.all = (await (await fetch('/api/cards')).json()).items; } catch { cardState.all = []; }
+  cardState.sel.clear(); drawCards();
+}
+function drawCards() {
+  const q = $('cardSearch').value.toLowerCase();
+  const rows = cardState.all.filter(c => (c.name + ' ' + c.last4 + ' ' + c.tag).toLowerCase().includes(q));
+  $('cardBadge').textContent = `${cardState.all.length} cards`;
+  $('cCards').textContent = cardState.all.length || '';
+  renderTable($('cardTable'), [
+    { h: '', k: 'id', f: c => `<input type="checkbox" data-cid="${c.id}" ${cardState.sel.has(c.id) ? 'checked' : ''}>` },
+    { h: 'Name', k: 'name' },
+    { h: 'Card', k: 'last4', f: c => `${esc(c.bin)}•••••• ${esc(c.last4)}` },
+    { h: 'Expiry', k: 'exp' }, { h: 'Tag', k: 'tag' },
+  ], rows, cardState);
+  $('btnCardDel').disabled = !cardState.sel.size;
+  $('btnCardDel').textContent = cardState.sel.size ? `Delete ${cardState.sel.size} selected` : 'Delete selected';
+  $('cardTable').querySelectorAll('[data-cid]').forEach(cb => cb.onchange = () => {
+    cb.checked ? cardState.sel.add(+cb.dataset.cid) : cardState.sel.delete(+cb.dataset.cid);
+    $('btnCardDel').disabled = !cardState.sel.size;
+    $('btnCardDel').textContent = cardState.sel.size ? `Delete ${cardState.sel.size} selected` : 'Delete selected';
+  });
+}
+$('cardSearch').oninput = () => { cardState.page = 0; drawCards(); };
+$('btnCardAdd').onclick = async () => {
+  const fl = flash($('cardOk'), $('cardErr'));
+  try {
+    const d = await (await fetch('/api/cards', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: $('cardText').value }) })).json();
+    if (d.ok) { fl.ok(`Added ${d.added}, skipped ${d.skipped}.`); $('cardText').value = ''; loadCards(); pollStatus(); } else fl.err(d.error);
+  } catch (e) { fl.err(e.message); }
+};
+$('btnCardDel').onclick = async () => {
+  if (!confirm(`Delete ${cardState.sel.size} card(s)? This can't be undone.`)) return;
+  await fetch('/api/cards', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: [...cardState.sel] }) });
+  loadCards(); pollStatus();
+};
+
 // ── settings ───────────────────────────────────────────────────────────────
 async function loadSettings() {
   try {
@@ -519,6 +590,10 @@ async function loadSettings() {
     const sh = cfg.shop_api || {};
     $('buyProductId').value = sh.product_id || '';
     $('buyApiKey').value = sh.api_key || '';
+    const ab = sh.auto_buy || {};
+    $('abOn').checked = !!ab.enabled;
+    $('abMin').value = ab.min_cards ?? 2;
+    $('abAmount').value = ab.amount ?? 5;
   } catch {}
 }
 loadSettings();
@@ -595,6 +670,17 @@ $('btnBuy').onclick = async () => {
       fl.ok(`Bought ${(d.items || []).length} items. Trans: ${d.trans_id || ''}`);
       (d.items || []).forEach(it => { const div = document.createElement('div'); div.textContent = it; div.style.cssText = 'padding:4px 0;border-bottom:1px solid var(--border)'; items.appendChild(div); });
     } else fl.err(d.error || d.msg);
+  } catch (e) { fl.err(e.message); }
+};
+
+$('btnSaveAutoBuy').onclick = async () => {
+  const fl = flash($('abOk'), $('abErr'));
+  try {
+    const d = await saveConfig(full => {
+      full.shop_api = { ...(full.shop_api || {}), api_key: $('buyApiKey').value, product_id: $('buyProductId').value,
+        auto_buy: { enabled: $('abOn').checked, min_cards: parseInt($('abMin').value) || 0, amount: parseInt($('abAmount').value) || 1 } };
+    });
+    d.ok ? fl.ok() : fl.err(d.error);
   } catch (e) { fl.err(e.message); }
 };
 

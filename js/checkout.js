@@ -215,9 +215,9 @@ function appendCode(email, code) {
   fs.appendFileSync(CODES_CSV, csvEscape(email, code, ts) + '\n', 'utf8');
 }
 
-function readCards() {
+function parseCards(text) {
   const cards = [];
-  for (const raw of fs.readFileSync(CARDS_TXT, 'utf8').split(/\r?\n/)) {
+  for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim();
     if (!line || line.startsWith('#')) continue;
     const p = line.split('|').map(s => s.trim());
@@ -227,8 +227,43 @@ function readCards() {
       kyash_email: p[6] || 'default',
     });
   }
+  return cards;
+}
+
+function readCards() {
+  const cards = parseCards(fs.readFileSync(CARDS_TXT, 'utf8'));
   if (!cards.length) throw new Error('cards.txt is empty or has no valid entries');
   return cards;
+}
+
+// ── Auto-buy: top up cards.txt from the shop API while the run is going ─────
+const AUTO_BUY = CFG.shop_api?.auto_buy ?? {};
+async function autoBuyCards() {
+  const shop = CFG.shop_api ?? {};
+  if (!shop.api_key || !shop.product_id) { console.log('[Buy] shop_api not configured — skipping auto-buy'); return []; }
+  const amount = parseInt(AUTO_BUY.amount) || 5;
+  console.log(`[Buy] Auto-buying ${amount} card(s)...`);
+  try {
+    const res = await fetch(`${shop.base_url ?? 'https://codecraftdeveloper.com/api'}/buy_product`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': 'Mozilla/5.0' },
+      body: new URLSearchParams({ action: 'buyProduct', id: shop.product_id, amount, api_key: shop.api_key }).toString(),
+      signal: AbortSignal.timeout(30000),
+    });
+    const raw = await res.text();
+    let data; try { data = JSON.parse(raw); } catch { data = { msg: raw.slice(0, 120) }; }
+    const items = (data.data || []).map(String);
+    if (items.length) fs.appendFileSync(path.join(__dirname, '..', 'purchased.txt'), items.join('\n') + '\n', 'utf8');
+    const usable = items.filter(l => l.split('|').length >= 6);
+    const fresh = parseCards(usable.join('\n'));
+    if (!fresh.length) { console.log(`[Buy] No usable cards returned: ${data.msg || 'unknown response'}`); return []; }
+    fs.appendFileSync(CARDS_TXT, '\n' + usable.join('\n') + '\n', 'utf8');
+    console.log(`[Buy] ✓ Added ${fresh.length} card(s) to cards.txt`);
+    return fresh;
+  } catch (e) {
+    console.log(`[Buy] Auto-buy failed: ${e.message}`);
+    return [];
+  }
 }
 
 async function cfPost(url, body) {
@@ -697,6 +732,7 @@ async function run() {
   await nordvpnConnect();
 
   const exhausted = new Set();
+  let lastBuyIdx = -3;
 
   for (let idx = 0; idx < pending.length; idx++) {
     const num      = idx + 1;
@@ -706,6 +742,11 @@ async function run() {
     if (num > 1 && (num - 1) % NORDVPN_EVERY === 0) {
       await nordvpnDisconnect();
       await nordvpnConnect();
+    }
+
+    if (AUTO_BUY.enabled && idx - lastBuyIdx >= 3 && cards.length - exhausted.size <= (parseInt(AUTO_BUY.min_cards) || 2)) {
+      lastBuyIdx = idx;
+      cards.push(...await autoBuyCards());
     }
 
     let cardIdx = null;

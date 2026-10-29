@@ -26,6 +26,7 @@ const FAILED_CSV    = path.join(BASE, '1', 'failed.csv');
 const CANCELLED_CSV = path.join(BASE, '1', 'cancelled.csv');
 const PURCHASED_TXT = path.join(BASE, 'purchased.txt');
 const IS_LINUX      = process.platform === 'linux';
+const vpnCountryArg = c => String(c).trim().replace(/\s+/g, '_');   // Linux CLI wants United_Kingdom
 const NORDVPN_EXE   = IS_LINUX ? 'nordvpn' : 'C:\\Program Files\\NordVPN\\NordVPN.exe';
 
 // ── State ──────────────────────────────────────────────────────────────────
@@ -338,6 +339,44 @@ app.post('/api/vpn/login', (req, res) => {
   else res.status(500).json({ error: out || 'login failed' });
 });
 
+// ── Cards (cards.txt manager) ──────────────────────────────────────────────
+// line format: first|last|number|exp_month|exp_year|cvv|kyash_email
+function readCardLines() {
+  try { return fs.readFileSync(CARDS_TXT, 'utf8').split(/\r?\n/); } catch { return []; }
+}
+function cardView(line, i) {
+  const p = line.split('|').map(s => s.trim());
+  return { id: i, name: `${p[0] || ''} ${p[1] || ''}`.trim(), last4: (p[2] || '').slice(-4), bin: (p[2] || '').slice(0, 6),
+           exp: `${p[3] || '??'}/${p[4] || '??'}`, tag: p[6] || '' };
+}
+app.get('/api/cards', (req, res) => {
+  const items = [];
+  readCardLines().forEach((l, i) => {
+    if (l.trim() && !l.trim().startsWith('#') && l.split('|').length >= 6) items.push(cardView(l, i));
+  });
+  res.json({ items });
+});
+app.post('/api/cards', (req, res) => {
+  const lines = String(req.body?.text || '').split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+  const good = lines.filter(l => l.split('|').length >= 6);
+  if (!good.length) return res.status(400).json({ error: 'no valid lines (need first|last|number|mm|yy|cvv|tag)' });
+  const existing = new Set(readCardLines().map(l => l.trim()));
+  const add = [...new Set(good)].filter(l => !existing.has(l));
+  if (add.length) {
+    const cur = fs.existsSync(CARDS_TXT) ? fs.readFileSync(CARDS_TXT, 'utf8') : '';
+    fs.writeFileSync(CARDS_TXT, cur + (cur && !cur.endsWith('\n') ? '\n' : '') + add.join('\n') + '\n', 'utf8');
+  }
+  res.json({ ok: true, added: add.length, skipped: lines.length - add.length });
+});
+app.delete('/api/cards', (req, res) => {
+  const ids = new Set((req.body?.ids || []).map(Number));
+  if (!ids.size) return res.status(400).json({ error: 'no ids' });
+  const lines = readCardLines();
+  const kept = lines.filter((_, i) => !ids.has(i));
+  fs.writeFileSync(CARDS_TXT, kept.join('\n'), 'utf8');
+  res.json({ ok: true, removed: lines.length - kept.length });
+});
+
 // ── VPN status / test ──────────────────────────────────────────────────────
 const { execFile } = require('child_process');
 function run(cmd, args, timeout = 15000) {
@@ -387,7 +426,7 @@ app.post('/api/vpn/test', async (req, res) => {
     const ipBefore = await publicIp();
     step('public IP (before)', !!ipBefore, ipBefore || 'lookup failed');
 
-    const c = await run('nordvpn', ['connect', country], 60000);
+    const c = await run('nordvpn', ['connect', vpnCountryArg(country)], 60000);
     const after = await vpnInfo();
     step('connect', c.ok && after.connected, after.connected ? `${after.country || country}` : c.out.split('\n').pop());
 
@@ -407,7 +446,7 @@ app.post('/api/vpn/test', async (req, res) => {
 app.post('/api/vpn/connect', (req, res) => {
   const cfg     = loadCfg();
   const country = req.body?.country || cfg.nordvpn?.country || 'United Kingdom';
-  const args    = IS_LINUX ? ['connect', country] : ['-c', '-g', country];
+  const args    = IS_LINUX ? ['connect', vpnCountryArg(country)] : ['-c', '-g', country];
   spawn(NORDVPN_EXE, args, { detached: true, stdio: 'ignore' });
   pushLog(`[VPN] Connecting to ${country}...`);
   res.json({ ok: true });
