@@ -1,0 +1,15 @@
+{
+  "name": "addproxy-js",
+  "version": "1.0.0",
+  "description": "Patchright + real Chrome checkout automation",
+  "main": "checkout.js",
+  "scripts": {
+    "start": "node checkout.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "patchright": "^1.50.0"
+  }
+}

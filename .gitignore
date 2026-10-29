@@ -1,0 +1,31 @@
+# Sensitive data
+cards.txt
+emails.csv
+*/cards.txt
+*/emails.csv
+
+# Output CSVs
+success.csv
+successemailfull.csv
+failed.csv
+codes.csv
+cancelled.csv
+cancel_failed.csv
+*/success.csv
+*/successemailfull.csv
+*/failed.csv
+*/codes.csv
+*/cancelled.csv
+*/cancel_failed.csv
+
+# Tracking files
+*/used_dots.txt
+used_dots.txt
+
+# Node
+js/node_modules/
+js/package-lock.json
+
+# Python
+__pycache__/
+*.pyc
