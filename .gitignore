@@ -12,3 +12,4 @@ cards.txt
 js/*.csv
 js/package-lock.json
 1/used_dots.txt
+js/debug/

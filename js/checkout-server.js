@@ -782,6 +782,13 @@ async function run() {
         break;
 
       } catch (err) {
+        // debug: keep a screenshot of what the page looked like when it failed
+        try {
+          const dbg = path.join(__dirname, 'debug'); fs.mkdirSync(dbg, { recursive: true });
+          const f = path.join(dbg, `fail-${Date.now()}.png`);
+          await page.screenshot({ path: f, timeout: 8000 });
+          console.log(`  [debug] url=${page.url()} screenshot=${f}`);
+        } catch {}
         const reason    = err.message.split('\n')[0];
         const isNetwork = NETWORK_ERRORS.some(e => reason.includes(e));
 
