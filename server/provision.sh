@@ -17,4 +17,10 @@ if [ ! -d "$HERE/../js/node_modules/patchright" ]; then
   echo "[setup] npm install (js)"
   (cd "$HERE/../js" && npm install)
 fi
+# keep SSH + dashboard reachable when NordVPN connects
+if command -v nordvpn >/dev/null; then
+  nordvpn whitelist add port 22 >/dev/null 2>&1 || true
+  nordvpn whitelist add port 5050 >/dev/null 2>&1 || true
+  nordvpn set killswitch off >/dev/null 2>&1 || true
+fi
 echo "[setup] done: $(google-chrome --version)"

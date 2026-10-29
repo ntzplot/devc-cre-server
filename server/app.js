@@ -410,6 +410,13 @@ async function publicIp(tries = 1) {
   }
   return null;
 }
+// Keep SSH + dashboard reachable while the VPN is up (otherwise connecting cuts them off)
+async function vpnProtectAccess() {
+  if (!IS_LINUX) return;
+  for (const port of ['22', '5050'])
+    await run('nordvpn', ['whitelist', 'add', 'port', port]);   // already-present is a harmless error
+  await run('nordvpn', ['set', 'killswitch', 'off']);
+}
 async function vpnInfo() {
   if (!IS_LINUX) return { cli: false, logged_in: null, connected: vpnUp(), detail: 'Login status is only available with the Linux CLI.' };
   const acc = await run('nordvpn', ['account']);
@@ -447,6 +454,7 @@ app.post('/api/vpn/test', async (req, res) => {
     const ipBefore = await publicIp();
     step('public IP (before)', !!ipBefore, ipBefore || 'lookup failed');
 
+    await vpnProtectAccess();
     const c = await run('nordvpn', ['connect', vpnCountryArg(country)], 60000);
     const after = await vpnInfo();
     step('connect', c.ok && after.connected, after.connected ? `${after.country || country}` : c.out.split('\n').pop());
@@ -464,9 +472,10 @@ app.post('/api/vpn/test', async (req, res) => {
   } finally { _vpnTesting = false; }
 });
 
-app.post('/api/vpn/connect', (req, res) => {
+app.post('/api/vpn/connect', async (req, res) => {
   const cfg     = loadCfg();
   const country = req.body?.country || cfg.nordvpn?.country || 'United Kingdom';
+  await vpnProtectAccess();
   const args    = IS_LINUX ? ['connect', vpnCountryArg(country)] : ['-c', '-g', country];
   spawn(NORDVPN_EXE, args, { detached: true, stdio: 'ignore' });
   pushLog(`[VPN] Connecting to ${country}...`);
