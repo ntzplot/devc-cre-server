@@ -6,3 +6,9 @@ node_modules/
 purchased.txt
 *.log
 .env
+cards.txt
+1/cards.txt
+*success*.csv
+js/*.csv
+js/package-lock.json
+1/used_dots.txt
