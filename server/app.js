@@ -12,7 +12,7 @@ const path     = require('path');
 const fs       = require('fs');
 const http     = require('http');
 const https    = require('https');
-const { spawn, execSync } = require('child_process');
+const { spawn, execSync, spawnSync } = require('child_process');
 
 const app    = express();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -254,6 +254,16 @@ app.delete('/api/schedule', (req, res) => {
   if (_schedule?.timer) clearTimeout(_schedule.timer);
   _schedule = null;
   res.json({ ok: true });
+});
+
+app.post('/api/vpn/login', (req, res) => {
+  const token = (req.body?.token || '').trim();
+  if (!token) return res.status(400).json({ error: 'token required' });
+  const r = spawnSync('nordvpn', ['login', '--token', token], { timeout: 15000, encoding: 'utf8' });
+  const out = (r.stdout + r.stderr).trim();
+  pushLog('[VPN] ' + out);
+  if (r.status === 0) res.json({ ok: true, msg: out });
+  else res.status(500).json({ error: out || 'login failed' });
 });
 
 app.post('/api/vpn/connect', (req, res) => {

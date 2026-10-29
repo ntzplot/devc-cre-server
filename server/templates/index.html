@@ -169,11 +169,17 @@ header .spacer{flex:1}
     <!-- VPN -->
     <div class="card">
       <h3>NordVPN</h3>
+      <div class="row"><label>Token</label><input type="password" id="vpnToken" placeholder="Paste access token…"></div>
+      <div class="btn-row" style="margin-bottom:10px">
+        <button class="btn btn-blue" id="btnVpnLogin">Login</button>
+      </div>
       <div class="row"><label>Country</label><input type="text" id="vpnCountry" placeholder="United Kingdom"></div>
       <div class="btn-row">
         <button class="btn btn-green" id="btnVpnOn">Connect</button>
         <button class="btn btn-red"   id="btnVpnOff">Disconnect</button>
       </div>
+      <div class="alert alert-green" id="vpnLoginOk"></div>
+      <div class="alert alert-red"   id="vpnLoginErr"></div>
     </div>
 
   </div><!-- end left col -->
@@ -575,6 +581,28 @@ document.getElementById('btnSchedClear').onclick = async () => {
 };
 
 // ── vpn buttons ────────────────────────────────────────────────────────────
+document.getElementById('btnVpnLogin').onclick = async () => {
+  const token = document.getElementById('vpnToken').value.trim();
+  const ok  = document.getElementById('vpnLoginOk');
+  const err = document.getElementById('vpnLoginErr');
+  ok.classList.remove('show'); err.classList.remove('show');
+  if (!token) { err.textContent = 'Paste your token first.'; err.classList.add('show'); return; }
+  try {
+    const r = await fetch('/api/vpn/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token })
+    });
+    const d = await r.json();
+    if (d.ok) {
+      ok.textContent = d.msg || 'Logged in.';
+      ok.classList.add('show');
+      document.getElementById('vpnToken').value = '';
+    } else {
+      err.textContent = d.error; err.classList.add('show');
+    }
+  } catch(e) { err.textContent = e.message; err.classList.add('show'); }
+};
+
 document.getElementById('btnVpnOn').onclick = async () => {
   const country = document.getElementById('vpnCountry').value || 'United Kingdom';
   await fetch('/api/vpn/connect', {
