@@ -276,15 +276,15 @@ tr:last-child td{border-bottom:none}
 
 <!-- ═══════ BUY ═══════ -->
 <section id="s-buy">
-  <div class="page-head"><div><h1>Auto Buy</h1><p>Buy cards from codecraftdeveloper.com — automatically during a run, or manually.</p></div>
+  <div class="page-head"><div><h1>Auto Buy</h1><p>Buy Hotmail accounts from codecraftdeveloper.com — automatically during a run, or manually.</p></div>
     <button class="btn btn-primary" id="btnSaveAutoBuy">Save</button></div>
   <div class="card">
     <h3>Automatic</h3>
-    <p class="sub">While a run is going, new cards are bought and added to cards.txt whenever the unused cards drop to the minimum.</p>
+    <p class="sub">While a run is going, new accounts are bought and added to the email pool whenever the pending accounts drop to the minimum.</p>
     <div class="row"><label class="l">Auto-buy during run</label><input type="checkbox" id="abOn"></div>
-    <div class="row"><label class="l">Buy when cards ≤</label><input type="number" id="abMin" value="2" min="0" style="max-width:120px;flex:none"><span class="help">unused cards left</span></div>
-    <div class="row"><label class="l">Cards per purchase</label><input type="number" id="abAmount" value="5" min="1" style="max-width:120px;flex:none"></div>
-    <div class="row"><label class="l">Cards in stock</label><span id="abStock" class="badge b-blue">0</span></div>
+    <div class="row"><label class="l">Buy when pending ≤</label><input type="number" id="abMin" value="2" min="0" style="max-width:120px;flex:none"><span class="help">pending accounts left</span></div>
+    <div class="row"><label class="l">Accounts per purchase</label><input type="number" id="abAmount" value="5" min="1" style="max-width:120px;flex:none"></div>
+    <div class="row"><label class="l">Pending accounts</label><span id="abStock" class="badge b-blue">0</span></div>
     <div class="alert alert-green" id="abOk">Saved.</div><div class="alert alert-red" id="abErr"></div>
   </div>
   <div class="card">
@@ -415,12 +415,12 @@ async function pollStatus() {
     $('kFailed').textContent = d.failed;
     $('kCancelled').textContent = d.cancelled;
     $('kCards').textContent = d.cards ?? 0;
-    $('abStock').textContent = d.cards ?? 0;
     const tot = d.success + d.failed;
     $('kRate').textContent = tot ? `${Math.round(d.success / tot * 100)}% success rate` : 'no runs yet';
 
     const em = d.emails || {};
     $('kPending').textContent = em.pending || 0;
+    $('abStock').textContent = em.pending || 0;
     $('kPoolHint').textContent = `pending of ${em.total || 0}`;
     $('poolBar').style.width = (em.total ? em.done / em.total * 100 : 0) + '%';
     $('emailBadge').textContent = `${em.total || 0} loaded · ${em.pending || 0} pending`;
@@ -592,7 +592,7 @@ async function loadSettings() {
     $('buyApiKey').value = sh.api_key || '';
     const ab = sh.auto_buy || {};
     $('abOn').checked = !!ab.enabled;
-    $('abMin').value = ab.min_cards ?? 2;
+    $('abMin').value = ab.min_accounts ?? 5;
     $('abAmount').value = ab.amount ?? 5;
   } catch {}
 }
@@ -678,7 +678,7 @@ $('btnSaveAutoBuy').onclick = async () => {
   try {
     const d = await saveConfig(full => {
       full.shop_api = { ...(full.shop_api || {}), api_key: $('buyApiKey').value, product_id: $('buyProductId').value,
-        auto_buy: { enabled: $('abOn').checked, min_cards: parseInt($('abMin').value) || 0, amount: parseInt($('abAmount').value) || 1 } };
+        auto_buy: { enabled: $('abOn').checked, min_accounts: parseInt($('abMin').value) || 0, amount: parseInt($('abAmount').value) || 1 } };
     });
     d.ok ? fl.ok() : fl.err(d.error);
   } catch (e) { fl.err(e.message); }

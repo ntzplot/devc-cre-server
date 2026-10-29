@@ -263,44 +263,55 @@ app.post('/api/upload/emails', upload.single('file'), (req, res) => {
   res.json({ ok: true, count: lines.length });
 });
 
-app.post('/api/buy', async (req, res) => {
-  const qty  = parseInt(req.body?.amount) || 1;
-  const cfg  = loadCfg();
-  const shop = cfg.shop_api || {};
+function buyAccounts(qty) {
+  const shop = loadCfg().shop_api || {};
   const { api_key, product_id, base_url = 'https://codecraftdeveloper.com/api' } = shop;
-  if (!api_key || !product_id)
-    return res.status(400).json({ error: 'shop_api not configured in config.json' });
-
-  const payload = new URLSearchParams({ action: 'buyProduct', id: product_id, amount: qty, api_key }).toString();
-
-  try {
-    const data = await new Promise((resolve, reject) => {
-      const url  = new URL(`${base_url}/buy_product`);
-      const mod  = url.protocol === 'https:' ? https : http;
-      const body = Buffer.from(payload);
-      const r = mod.request({
-        hostname: url.hostname, path: url.pathname, method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': body.length, 'User-Agent': 'Mozilla/5.0' },
-      }, resp => {
-        let raw = '';
-        resp.on('data', d => raw += d);
-        resp.on('end', () => { try { resolve(JSON.parse(raw)); } catch { resolve({ msg: raw }); } });
-      });
-      r.on('error', reject);
-      r.setTimeout(20000, () => r.destroy(new Error('timeout')));
-      r.write(body); r.end();
+  if (!api_key || !product_id) return Promise.reject(new Error('shop_api not configured in config.json'));
+  const body = Buffer.from(new URLSearchParams({ action: 'buyProduct', id: product_id, amount: qty, api_key }).toString());
+  return new Promise((resolve, reject) => {
+    const url = new URL(`${base_url}/buy_product`);
+    const r = (url.protocol === 'https:' ? https : http).request({
+      hostname: url.hostname, path: url.pathname, method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': body.length, 'User-Agent': 'Mozilla/5.0' },
+    }, resp => {
+      let raw = '';
+      resp.on('data', d => raw += d);
+      resp.on('end', () => { try { resolve(JSON.parse(raw)); } catch { resolve({ msg: raw }); } });
     });
-
-    const items = data.data || [];
+    r.on('error', reject);
+    r.setTimeout(20000, () => r.destroy(new Error('timeout')));
+    r.write(body); r.end();
+  }).then(data => {
+    const items = (data.data || []).map(String);
     if (items.length) {
       fs.appendFileSync(PURCHASED_TXT, items.join('\n') + '\n', 'utf8');
-      pushLog(`[Buy] Purchased ${items.length} items — saved to purchased.txt`);
+      // bought hotmail accounts go straight into the pool the run reads
+      fs.mkdirSync(path.dirname(EMAILS_CSV), { recursive: true });
+      const cur = fs.existsSync(EMAILS_CSV) ? fs.readFileSync(EMAILS_CSV, 'utf8') : '';
+      fs.appendFileSync(EMAILS_CSV, (cur && !cur.endsWith('\n') ? '\n' : '') + items.join('\n') + '\n', 'utf8');
+      pushLog(`[Buy] Purchased ${items.length} account(s) — added to email pool`);
     }
-    res.json({ ok: true, status: data.status, items, trans_id: data.trans_id, msg: data.msg });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
+    return { items, status: data.status, trans_id: data.trans_id, msg: data.msg };
+  });
+}
+
+app.post('/api/buy', async (req, res) => {
+  try { res.json({ ok: true, ...(await buyAccounts(parseInt(req.body?.amount) || 1)) }); }
+  catch (e) { res.status(e.message.includes('not configured') ? 400 : 500).json({ error: e.message }); }
 });
+
+// ── Auto-buy while a run is active: keep the email pool topped up ──────────
+let _autoBuying = false, _lastAutoBuy = 0;
+setInterval(async () => {
+  if (_autoBuying || !(_proc && _proc.exitCode === null)) return;
+  const ab = loadCfg().shop_api?.auto_buy || {};
+  if (!ab.enabled || Date.now() - _lastAutoBuy < 60_000) return;
+  if (countEmails().pending > (parseInt(ab.min_accounts) || 0)) return;
+  _autoBuying = true; _lastAutoBuy = Date.now();
+  try { pushLog(`[Buy] Pool low — buying ${parseInt(ab.amount) || 5}...`); await buyAccounts(parseInt(ab.amount) || 5); }
+  catch (e) { pushLog(`[Buy] Auto-buy failed: ${e.message}`); }
+  _autoBuying = false;
+}, 15_000);
 
 app.post('/api/schedule', (req, res) => {
   const { time: timeStr, count = 1 } = req.body || {};
@@ -386,11 +397,18 @@ function run(cmd, args, timeout = 15000) {
   return new Promise(resolve => execFile(cmd, args, { timeout, encoding: 'utf8' },
     (err, stdout, stderr) => resolve({ ok: !err, out: ((stdout || '') + (stderr || '')).replace(/[\r\x00-\x08]|\x1b\[[0-9;?]*[A-Za-z]|[-\\|/]\s{2,}/g, '').trim() })));
 }
-async function publicIp() {
-  try {
-    const r = await fetch('https://api.ipify.org?format=json', { signal: AbortSignal.timeout(8000) });
-    return (await r.json()).ip;
-  } catch { return null; }
+async function publicIp(tries = 1) {
+  for (let i = 0; i < tries; i++) {
+    for (const u of ['https://api.ipify.org?format=json', 'https://ipinfo.io/json']) {
+      try {
+        const r = await fetch(u, { signal: AbortSignal.timeout(8000) });
+        const ip = (await r.json()).ip;
+        if (ip) return ip;
+      } catch {}
+    }
+    await new Promise(r => setTimeout(r, 3000));
+  }
+  return null;
 }
 async function vpnInfo() {
   if (!IS_LINUX) return { cli: false, logged_in: null, connected: vpnUp(), detail: 'Login status is only available with the Linux CLI.' };
@@ -433,7 +451,7 @@ app.post('/api/vpn/test', async (req, res) => {
     const after = await vpnInfo();
     step('connect', c.ok && after.connected, after.connected ? `${after.country || country}` : c.out.split('\n').pop());
 
-    const ipVpn = after.connected ? await publicIp() : null;
+    const ipVpn = after.connected ? await publicIp(5) : null;
     step('public IP (on VPN)', !!ipVpn && ipVpn !== ipBefore, ipVpn ? `${ipVpn}${ipVpn === ipBefore ? ' (unchanged)' : ''}` : 'lookup failed');
 
     const d = await run('nordvpn', ['disconnect'], 30000);
@@ -475,6 +493,19 @@ app.post('/api/update', (req, res) => {
     try { execSync('pm2 restart xpat 2>&1'); } catch {}
   }, 200);
 });
+
+// ── Provision VPS (Xvfb + Chrome + js deps) if anything is missing ─────────
+if (IS_LINUX && process.getuid?.() === 0) {
+  const missing = spawnSync('bash', ['-c', 'command -v xvfb-run && command -v google-chrome'], { encoding: 'utf8' }).status !== 0
+    || !fs.existsSync(path.join(BASE, 'js', 'node_modules', 'patchright'));
+  if (missing) {
+    pushLog('[Setup] Installing Chrome, Xvfb and checkout dependencies (first run)...');
+    const p = spawn('bash', [path.join(__dirname, 'provision.sh')], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const cap = d => String(d).split(/\r?\n/).forEach(l => { if (l.trim()) pushLog(l.slice(0, 200)); });
+    p.stdout.on('data', cap); p.stderr.on('data', cap);
+    p.on('exit', c => pushLog(c === 0 ? '[Setup] ✓ complete' : `[Setup] ✗ failed (exit ${c}) — see logs`));
+  }
+}
 
 // ── Boot ───────────────────────────────────────────────────────────────────
 app.listen(5050, '0.0.0.0', () => console.log('Dashboard → http://localhost:5050'));
