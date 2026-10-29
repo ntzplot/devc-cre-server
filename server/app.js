@@ -130,6 +130,78 @@ app.get('/api/status', (req, res) => {
   });
 });
 
+// ── Records (CSV-backed "database") ────────────────────────────────────────
+function parseCsv(text) {
+  const rows = []; let row = [], cur = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === '"' && text[i + 1] === '"') { cur += '"'; i++; }
+      else if (c === '"') q = false;
+      else cur += c;
+    } else if (c === '"') q = true;
+    else if (c === ',') { row.push(cur); cur = ''; }
+    else if (c === '\n' || c === '\r') {
+      if (c === '\r' && text[i + 1] === '\n') i++;
+      row.push(cur); cur = '';
+      if (row.some(v => v.trim())) rows.push(row);
+      row = [];
+    } else cur += c;
+  }
+  row.push(cur);
+  if (row.some(v => v.trim())) rows.push(row);
+  return rows;
+}
+
+function readRecords(fpath) {
+  try {
+    const rows = parseCsv(fs.readFileSync(fpath, 'utf8'));
+    const head = (rows.shift() || []).map(h => h.trim());
+    const ei = head.indexOf('email'), ti = head.indexOf('timestamp'), ni = head.indexOf('note');
+    return rows.map(r => ({ email: r[ei] || '', timestamp: r[ti] || '', note: r[ni] || '' }))
+               .filter(r => r.email);
+  } catch { return []; }
+}
+
+const RECORD_FILES = { success: SUCCESS_CSV, failed: FAILED_CSV, cancelled: CANCELLED_CSV };
+
+app.get('/api/records', (req, res) => {
+  const type = req.query.type;
+  if (type === 'emails') {
+    // never expose passwords / tokens — email address and status only
+    const done = new Set([...readRecords(SUCCESS_CSV), ...readRecords(FAILED_CSV)].map(r => r.email));
+    try {
+      const items = fs.readFileSync(EMAILS_CSV, 'utf8').split('\n')
+        .filter(l => l.trim() && !l.startsWith('#'))
+        .map(l => { const e = l.split('|')[0].trim(); return { email: e, status: done.has(e) ? 'used' : 'pending' }; });
+      return res.json({ items });
+    } catch { return res.json({ items: [] }); }
+  }
+  if (!RECORD_FILES[type]) return res.status(400).json({ error: 'bad type' });
+  res.json({ items: readRecords(RECORD_FILES[type]).reverse() });
+});
+
+app.get('/api/stats', (req, res) => {
+  const days = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(); d.setDate(d.getDate() - i);
+    days.push(d.toLocaleDateString('sv-SE'));
+  }
+  const series = { success: [], failed: [], cancelled: [] };
+  const reasons = {};
+  for (const [k, f] of Object.entries(RECORD_FILES)) {
+    const recs = readRecords(f);
+    series[k] = days.map(day => recs.filter(r => r.timestamp.startsWith(day)).length);
+    if (k === 'failed') recs.forEach(r => {
+      const n = (r.note || 'unknown').slice(0, 60);
+      reasons[n] = (reasons[n] || 0) + 1;
+    });
+  }
+  const topReasons = Object.entries(reasons).sort((a, b) => b[1] - a[1]).slice(0, 5)
+    .map(([reason, count]) => ({ reason, count }));
+  res.json({ days, series, topReasons });
+});
+
 app.get('/api/logs', (req, res) => {
   const since = parseInt(req.query.since) || 0;
   res.json({ lines: _logs.filter(l => l.i >= since) });
