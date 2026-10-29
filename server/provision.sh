@@ -19,8 +19,9 @@ if [ ! -d "$HERE/../js/node_modules/patchright" ]; then
 fi
 # keep SSH + dashboard reachable when NordVPN connects
 if command -v nordvpn >/dev/null; then
-  nordvpn whitelist add port 22 >/dev/null 2>&1 || true
-  nordvpn whitelist add port 5050 >/dev/null 2>&1 || true
+  for p in 22 5050; do
+    nordvpn allowlist add port $p >/dev/null 2>&1 || nordvpn whitelist add port $p >/dev/null 2>&1 || true
+  done
   nordvpn set killswitch off >/dev/null 2>&1 || true
 fi
 echo "[setup] done: $(google-chrome --version)"

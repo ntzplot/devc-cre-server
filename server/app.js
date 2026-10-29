@@ -413,8 +413,11 @@ async function publicIp(tries = 1) {
 // Keep SSH + dashboard reachable while the VPN is up (otherwise connecting cuts them off)
 async function vpnProtectAccess() {
   if (!IS_LINUX) return;
-  for (const port of ['22', '5050'])
-    await run('nordvpn', ['whitelist', 'add', 'port', port]);   // already-present is a harmless error
+  for (const port of ['22', '5050']) {
+    // v6 renamed whitelist -> allowlist; already-present is a harmless error
+    const r = await run('nordvpn', ['allowlist', 'add', 'port', port]);
+    if (/doesn't exist/i.test(r.out)) await run('nordvpn', ['whitelist', 'add', 'port', port]);
+  }
   await run('nordvpn', ['set', 'killswitch', 'off']);
 }
 async function vpnInfo() {

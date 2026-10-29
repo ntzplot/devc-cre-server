@@ -265,7 +265,10 @@ function nordvpnAdapterUp() {
 
 async function nordvpnConnect(country = NORDVPN_CTRY) {
   // keep SSH + dashboard reachable while the VPN is up
-  for (const port of ['22', '5050']) spawnSync('nordvpn', ['whitelist', 'add', 'port', port], { timeout: 10_000 });
+  for (const port of ['22', '5050']) {
+    const r = spawnSync('nordvpn', ['allowlist', 'add', 'port', port], { encoding: 'utf8', timeout: 10_000 });
+    if (/doesn't exist/i.test((r.stdout || '') + (r.stderr || ''))) spawnSync('nordvpn', ['whitelist', 'add', 'port', port], { timeout: 10_000 });
+  }
   spawnSync('nordvpn', ['set', 'killswitch', 'off'], { timeout: 10_000 });
   console.log(`[NordVPN] Connecting to ${country}...`);
   try { spawnSync('nordvpn', ['connect', country.trim().replace(/\s+/g, '_')], { timeout: 60_000 }); }
