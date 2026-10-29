@@ -17,6 +17,17 @@ if [ ! -d "$HERE/../js/node_modules/patchright" ]; then
   echo "[setup] npm install (js)"
   (cd "$HERE/../js" && npm install)
 fi
+# Docker worker: Chrome + VPN run in a container so the VPN can't cut off this host
+if ! command -v docker >/dev/null; then
+  echo "[setup] installing docker"
+  apt-get install -y docker.io docker-compose-v2
+  systemctl enable --now docker
+fi
+if [ "$(docker inspect -f '{{.State.Running}}' xpat-worker 2>/dev/null)" != "true" ]; then
+  echo "[setup] building + starting worker container (several minutes)"
+  (cd "$HERE/.." && docker compose up -d --build)
+fi
+
 # keep SSH + dashboard reachable when NordVPN connects
 if command -v nordvpn >/dev/null; then
   for p in 22 5050; do

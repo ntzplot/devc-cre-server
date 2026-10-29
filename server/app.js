@@ -29,6 +29,25 @@ const IS_LINUX      = process.platform === 'linux';
 const vpnCountryArg = c => String(c).trim().replace(/\s+/g, '_');   // Linux CLI wants United_Kingdom
 const NORDVPN_EXE   = IS_LINUX ? 'nordvpn' : 'C:\\Program Files\\NordVPN\\NordVPN.exe';
 
+// ── Docker worker (VPN + Chrome live in a container so the VPN can't cut off the host) ──
+const WORKER = 'xpat-worker';
+let _dockerCache = { t: 0, v: false };
+function dockerWorker() {
+  if (!IS_LINUX) return false;
+  if (Date.now() - _dockerCache.t < 5000) return _dockerCache.v;
+  let v = false;
+  try {
+    v = execSync(`docker inspect -f {{.State.Running}} ${WORKER}`,
+      { timeout: 4000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() === 'true';
+  } catch {}
+  _dockerCache = { t: Date.now(), v };
+  return v;
+}
+// nordvpn runs inside the worker container when it exists, otherwise on the host
+function nordCmd(args) {
+  return dockerWorker() ? ['docker', ['exec', WORKER, 'nordvpn', ...args]] : ['nordvpn', args];
+}
+
 // ── State ──────────────────────────────────────────────────────────────────
 let _proc     = null;
 let _logs     = [];
@@ -89,7 +108,8 @@ function countCards() {
 function vpnUp() {
   try {
     if (IS_LINUX) {
-      const out = execSync('nordvpn status 2>&1', { timeout: 8000, encoding: 'utf8' });
+      const [c, a] = nordCmd(['status']);
+      const out = spawnSync(c, a, { timeout: 8000, encoding: 'utf8' }).stdout || '';
       return /Status:\s*Connected/i.test(out);
     }
     const out = execSync(
@@ -225,7 +245,10 @@ app.post('/api/start', (req, res) => {
 
   try {
     // Linux VPS: run the server variant inside a virtual display so real (headed) Chrome works
-    const [cmd, args] = IS_LINUX
+    const [cmd, args] = dockerWorker()
+      ? ['docker', ['exec', '-i', '-w', '/app/js', '-e', `AUTO_COUNT=${count}`, WORKER, 'xvfb-run', '-a',
+          '--server-args=-screen 0 1920x1080x24', 'node', 'checkout-server.js']]
+      : IS_LINUX
       ? ['xvfb-run', ['-a', '--server-args=-screen 0 1920x1080x24', 'node', path.join(cwd, 'checkout-server.js')]]
       : ['node', [path.join(cwd, 'checkout.js')]];
     const proc = spawn(cmd, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -250,6 +273,7 @@ app.post('/api/stop', (req, res) => {
   if (!_proc || _proc.exitCode !== null)
     return res.status(400).json({ error: 'not running' });
   _proc.kill('SIGTERM');
+  if (dockerWorker()) spawn('docker', ['exec', WORKER, 'pkill', '-f', 'checkout-server'], { stdio: 'ignore' });
   pushLog('── stopped by user ──');
   res.json({ ok: true });
 });
@@ -346,7 +370,8 @@ app.delete('/api/schedule', (req, res) => {
 app.post('/api/vpn/login', (req, res) => {
   const token = (req.body?.token || '').trim();
   if (!token) return res.status(400).json({ error: 'token required' });
-  const r = spawnSync('nordvpn', ['login', '--token', token], { timeout: 15000, encoding: 'utf8' });
+  const [lc, la] = nordCmd(['login', '--token', token]);
+  const r = spawnSync(lc, la, { timeout: 15000, encoding: 'utf8' });
   const out = (r.stdout + r.stderr).trim();
   pushLog('[VPN] ' + out);
   if (r.status === 0) res.json({ ok: true, msg: out });
@@ -397,8 +422,15 @@ function run(cmd, args, timeout = 15000) {
   return new Promise(resolve => execFile(cmd, args, { timeout, encoding: 'utf8' },
     (err, stdout, stderr) => resolve({ ok: !err, out: ((stdout || '') + (stderr || '')).replace(/[\r\x00-\x08]|\x1b\[[0-9;?]*[A-Za-z]|[-\\|/]\s{2,}/g, '').trim() })));
 }
+function nord(args, timeout) { const [c, a] = nordCmd(args); return run(c, a, timeout); }
 async function publicIp(tries = 1) {
   for (let i = 0; i < tries; i++) {
+    if (dockerWorker()) {   // the container's own egress IP, not the host's
+      const r = await run('docker', ['exec', WORKER, 'curl', '-s', '-m', '8', 'https://api.ipify.org']);
+      if (/^\d+\.\d+\.\d+\.\d+$/.test(r.out)) return r.out;
+      await new Promise(r => setTimeout(r, 3000));
+      continue;
+    }
     for (const u of ['https://api.ipify.org?format=json', 'https://ipinfo.io/json']) {
       try {
         const r = await fetch(u, { signal: AbortSignal.timeout(8000) });
@@ -412,18 +444,18 @@ async function publicIp(tries = 1) {
 }
 // Keep SSH + dashboard reachable while the VPN is up (otherwise connecting cuts them off)
 async function vpnProtectAccess() {
-  if (!IS_LINUX) return;
+  if (!IS_LINUX || dockerWorker()) return;   // container VPN can't affect the host
   for (const port of ['22', '5050']) {
     // v6 renamed whitelist -> allowlist; already-present is a harmless error
-    const r = await run('nordvpn', ['allowlist', 'add', 'port', port]);
-    if (/doesn't exist/i.test(r.out)) await run('nordvpn', ['whitelist', 'add', 'port', port]);
+    const r = await nord(['allowlist', 'add', 'port', port]);
+    if (/doesn't exist/i.test(r.out)) await nord(['whitelist', 'add', 'port', port]);
   }
-  await run('nordvpn', ['set', 'killswitch', 'off']);
+  await nord(['set', 'killswitch', 'off']);
 }
 async function vpnInfo() {
   if (!IS_LINUX) return { cli: false, logged_in: null, connected: vpnUp(), detail: 'Login status is only available with the Linux CLI.' };
-  const acc = await run('nordvpn', ['account']);
-  const st  = await run('nordvpn', ['status']);
+  const acc = await nord(['account']);
+  const st  = await nord(['status']);
   const notLogged = /not logged in|log in/i.test(acc.out) || (!acc.ok && /login/i.test(acc.out));
   const missing = !acc.ok && /ENOENT|not found/i.test(acc.out);
   return {
@@ -458,14 +490,14 @@ app.post('/api/vpn/test', async (req, res) => {
     step('public IP (before)', !!ipBefore, ipBefore || 'lookup failed');
 
     await vpnProtectAccess();
-    const c = await run('nordvpn', ['connect', vpnCountryArg(country)], 60000);
+    const c = await nord(['connect', vpnCountryArg(country)], 60000);
     const after = await vpnInfo();
     step('connect', c.ok && after.connected, after.connected ? `${after.country || country}` : c.out.split('\n').pop());
 
     const ipVpn = after.connected ? await publicIp(5) : null;
     step('public IP (on VPN)', !!ipVpn && ipVpn !== ipBefore, ipVpn ? `${ipVpn}${ipVpn === ipBefore ? ' (unchanged)' : ''}` : 'lookup failed');
 
-    const d = await run('nordvpn', ['disconnect'], 30000);
+    const d = await nord(['disconnect'], 30000);
     const end = await vpnInfo();
     step('disconnect', d.ok && !end.connected, end.connected ? 'still connected' : '');
 
@@ -479,15 +511,15 @@ app.post('/api/vpn/connect', async (req, res) => {
   const cfg     = loadCfg();
   const country = req.body?.country || cfg.nordvpn?.country || 'United Kingdom';
   await vpnProtectAccess();
-  const args    = IS_LINUX ? ['connect', vpnCountryArg(country)] : ['-c', '-g', country];
-  spawn(NORDVPN_EXE, args, { detached: true, stdio: 'ignore' });
+  const [vc, va] = IS_LINUX ? nordCmd(['connect', vpnCountryArg(country)]) : [NORDVPN_EXE, ['-c', '-g', country]];
+  spawn(vc, va, { detached: true, stdio: 'ignore' });
   pushLog(`[VPN] Connecting to ${country}...`);
   res.json({ ok: true });
 });
 
 app.post('/api/vpn/disconnect', (req, res) => {
-  const args = IS_LINUX ? ['disconnect'] : ['-d'];
-  spawn(NORDVPN_EXE, args, { detached: true, stdio: 'ignore' });
+  const [vc, va] = IS_LINUX ? nordCmd(['disconnect']) : [NORDVPN_EXE, ['-d']];
+  spawn(vc, va, { detached: true, stdio: 'ignore' });
   pushLog('[VPN] Disconnecting...');
   res.json({ ok: true });
 });

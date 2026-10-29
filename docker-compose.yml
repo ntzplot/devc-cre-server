@@ -1,0 +1,23 @@
+# Worker container: runs the checkout (real Chrome + Xvfb) and owns the VPN.
+#   docker compose up -d --build
+# Dashboard (server/app.js) stays on the host and uses `docker exec xpat-worker ...`.
+# Optional: put NORDVPN_TOKEN=... in a .env file next to this one (it is gitignored),
+# or log in later from the dashboard's Network page.
+services:
+  worker:
+    build: ./worker
+    container_name: xpat-worker
+    restart: unless-stopped
+    cap_add: [NET_ADMIN, NET_RAW]
+    devices: ["/dev/net/tun:/dev/net/tun"]
+    sysctls:
+      net.ipv6.conf.all.disable_ipv6: 1
+    environment:
+      - NORDVPN_TOKEN=${NORDVPN_TOKEN:-}
+    volumes:
+      - .:/app
+      - nordvpn-data:/var/lib/nordvpn
+    shm_size: "1gb"
+
+volumes:
+  nordvpn-data:
