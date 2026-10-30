@@ -56,7 +56,7 @@ const TIMEOUT     = 45_000;
 const NETWORK_ERRORS = [
   'ERR_NETWORK_CHANGED', 'ERR_INTERNET_DISCONNECTED',
   'ERR_NAME_NOT_RESOLVED', 'ERR_CONNECTION_RESET',
-  'ERR_PROXY_CONNECTION_FAILED',
+  'ERR_PROXY_CONNECTION_FAILED', 'Target page, context or browser has been closed',
 ];
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
@@ -196,9 +196,9 @@ async function fetchDevyceCode(email, timeoutMs = 120_000) {
 
 // ── CSV helpers ───────────────────────────────────────────────────────────────
 
-function alreadyProcessed() {
+function alreadyProcessed(files = [SUCCESS_CSV, FAILED_CSV]) {
   const done = new Set();
-  for (const p of [SUCCESS_CSV, FAILED_CSV]) {
+  for (const p of files) {
     if (!fs.existsSync(p)) continue;
     for (const row of fs.readFileSync(p, 'utf8').split(/\r?\n/).slice(1)) {
       const email = row.split(',')[0]?.replace(/^"|"$/g, '').trim();
@@ -677,20 +677,34 @@ async function cancelSubscription(email, code) {
 
 // ── Main loop ─────────────────────────────────────────────────────────────────
 
+// Hotmail accounts not yet succeeded/tried this run. If the pool is empty, wait (the
+// dashboard auto-buys while a run is active) and re-read emails.csv until some arrive.
+async function hotmailBatch(n, done, tried) {
+  const deadline = Date.now() + 5 * 60_000;
+  let announced = false;
+  while (true) {
+    const list = readHotmail().filter(e => !done.has(e) && !tried.has(e)).slice(0, n);
+    if (list.length) return list;
+    if (Date.now() > deadline) { console.log('Pool still empty after 5 min - stopping.'); return list; }
+    if (!announced) { console.log('[Hotmail] pool empty - waiting for auto-buy to add accounts...'); announced = true; }
+    await sleep(10_000);
+  }
+}
+
 async function run() {
   console.log(`Proxy: ${PROXY_CFG.enabled ? 'ON' : 'OFF'} | NordVPN: ${NORDVPN_CTRY} every ${NORDVPN_EVERY}`);
   console.log(`Mail check: ${DO_MAIL_CHECK ? 'ON' : 'OFF'} | Auto-cancel: ${DO_CANCEL ? 'ON' : 'OFF'}`);
   console.log(`Addresses loaded: ${ADDRESSES.length} | Names: ${loadLines(FIRSTNAME_TXT).length} first / ${loadLines(LASTNAME_TXT).length} last\n`);
 
   const count = await askCount();
-  const done  = alreadyProcessed();
+  const done  = alreadyProcessed(EMAIL_SOURCE === 'hotmail' ? [SUCCESS_CSV] : undefined);
   const cards = readCards();
 
   let pending = [];
+  const tried = new Set();
   if (EMAIL_SOURCE === 'hotmail') {
-    const pool = readHotmail();
-    pending = pool.filter(e => !done.has(e)).slice(0, count);
-    console.log(`\n[Hotmail] ${pool.length} in pool | ${pending.length} to process | Cards: ${cards.length}\n`);
+    pending = await hotmailBatch(count, done, tried);
+    console.log(`\n[Hotmail] ${pending.length} to process | Cards: ${cards.length}\n`);
     if (DO_MAIL_CHECK) console.log('[Hotmail] mail check is not supported in the JS checkout - skipping login-code fetch');
   } else {
     console.log(`\n[Mail] Generating ${count} emails...`);
@@ -706,13 +720,16 @@ async function run() {
     }
     console.log(`Generated: ${pending.length} fresh emails | Cards: ${cards.length}\n`);
   }
-  if (!pending.length) { console.log('Nothing to process.'); return; }
+  if (!pending.length) { console.log(EMAIL_SOURCE === 'hotmail' ? 'Nothing to process: every Hotmail account in 1/emails.csv already succeeded (or the pool is empty). Add more accounts (Emails page / Auto Buy).' : 'Nothing to process.'); return; }
 
   await nordvpnConnect();
 
   const exhausted = new Set();
+  let processed = 0;
 
+  while (true) {
   for (let idx = 0; idx < pending.length; idx++) {
+    tried.add(pending[idx]);
     const num      = idx + 1;
     const email    = pending[idx];
     const identity = pickIdentity();
@@ -724,7 +741,7 @@ async function run() {
 
     let cardIdx = null;
     for (let offset = 0; offset < cards.length; offset++) {
-      const candidate = (idx + offset) % cards.length;
+      const candidate = (processed + idx + offset) % cards.length;
       if (!exhausted.has(candidate)) { cardIdx = candidate; break; }
     }
     if (cardIdx === null) { console.log('All cards exhausted — stopping.'); break; }
@@ -811,6 +828,13 @@ async function run() {
     }
 
     await sleep(rand(3000, 6000));
+  }
+
+  processed += pending.length;
+  if (EMAIL_SOURCE !== 'hotmail' || processed >= count || exhausted.size >= cards.length) break;
+  // pool ran dry mid-run: the dashboard auto-buys; wait for fresh accounts and carry on
+  pending = await hotmailBatch(count - processed, alreadyProcessed([SUCCESS_CSV]), tried);
+  if (!pending.length) break;
   }
 
   console.log('\nDone.');

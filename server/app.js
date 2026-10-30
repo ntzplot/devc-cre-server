@@ -90,7 +90,7 @@ function countEmails() {
       .split('\n').filter(l => l.trim() && !l.startsWith('#'));
     const total = lines.length;
     const done_ = new Set();
-    for (const p of [SUCCESS_CSV, FAILED_CSV]) {
+    for (const p of [SUCCESS_CSV]) {
       try {
         const rows = fs.readFileSync(p, 'utf8').split('\n');
         const ei   = rows[0]?.split(',').findIndex(h => h.trim() === 'email') ?? -1;
@@ -336,7 +336,7 @@ let _autoBuying = false, _lastAutoBuy = 0;
 setInterval(async () => {
   if (_autoBuying || !(_proc && _proc.exitCode === null)) return;
   const ab = loadCfg().shop_api?.auto_buy || {};
-  if (!ab.enabled || Date.now() - _lastAutoBuy < 60_000) return;
+  if (ab.enabled === false || Date.now() - _lastAutoBuy < 20_000) return;
   if (countEmails().pending > (parseInt(ab.min_accounts) || 0)) return;
   _autoBuying = true; _lastAutoBuy = Date.now();
   try { pushLog(`[Buy] Pool low — buying ${parseInt(ab.amount) || 5}...`); await buyAccounts(parseInt(ab.amount) || 5); }
