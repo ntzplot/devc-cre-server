@@ -13,6 +13,7 @@ import json
 import random
 import re
 import shutil
+import subprocess
 import tempfile
 import time
 import traceback
@@ -28,6 +29,59 @@ _stealth = Stealth()
 # ── Config ────────────────────────────────────────────────────────────────────
 CF_WORKER_URL      = "https://yashotpreceiver.apoh59620.workers.dev"
 CF_EMAILCHECK_URL  = "https://yashemailchecker.apoh59620.workers.dev"
+
+_cfg_path = Path(__file__).parent.parent.parent / "config" / "config.json"
+_cfg = json.loads(_cfg_path.read_text(encoding="utf-8-sig")) if _cfg_path.exists() else {}
+NORDVPN_ENABLED         = _cfg.get("nordvpn", {}).get("enabled", False)
+NORDVPN_COUNTRY         = _cfg.get("nordvpn", {}).get("country", "Japan")
+NORDVPN_RECONNECT_EVERY = _cfg.get("nordvpn", {}).get("reconnect_every", 1)
+
+# ── NordVPN ───────────────────────────────────────────────────────────────────
+
+_NORDVPN_EXE = r"C:\Program Files\NordVPN\NordVPN.exe"
+
+
+def _nordvpn_run(*args, timeout=30):
+    return subprocess.run([_NORDVPN_EXE, *args], capture_output=True, text=True, timeout=timeout)
+
+
+def _nordvpn_adapter_up() -> bool:
+    try:
+        r = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             "Get-NetAdapter | Where-Object { $_.Name -like 'Nord*' -or "
+             "$_.InterfaceDescription -like 'Nord*' } | Select-Object -ExpandProperty Status"],
+            capture_output=True, text=True, timeout=10,
+        )
+        return "Up" in r.stdout
+    except Exception:
+        return False
+
+
+def nordvpn_connect(country: str = NORDVPN_COUNTRY):
+    print(f"[NordVPN] Connecting to {country}...")
+    try:
+        _nordvpn_run("-c", "-g", country)
+    except Exception as e:
+        print(f"[NordVPN] Connect error: {e}"); return
+    for _ in range(15):
+        time.sleep(2)
+        if _nordvpn_adapter_up():
+            print(f"[NordVPN] Connected to {country}"); return
+    print("[NordVPN] Warning: adapter not Up after 30s — continuing anyway")
+
+
+def nordvpn_disconnect():
+    print("[NordVPN] Disconnecting...")
+    try:
+        _nordvpn_run("-d", timeout=15)
+    except Exception as e:
+        print(f"[NordVPN] Disconnect error: {e}"); return
+    for _ in range(5):
+        time.sleep(2)
+        if not _nordvpn_adapter_up():
+            print("[NordVPN] Disconnected"); return
+    print("[NordVPN] Warning: adapter still Up — continuing anyway")
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -363,6 +417,9 @@ def checkout(page, email: str, card: dict) -> None:
 # ── Main loop ─────────────────────────────────────────────────────────────────
 
 def run():
+    vpn_status = f"{NORDVPN_COUNTRY} every {NORDVPN_RECONNECT_EVERY}" if NORDVPN_ENABLED else "OFF"
+    print(f"NordVPN: {vpn_status}\n")
+
     emails, full_lines = read_emails()
     done   = already_processed()
     pending = [e for e in emails if e not in done]
@@ -373,10 +430,17 @@ def run():
         print("Nothing to process.")
         return
 
+    if NORDVPN_ENABLED:
+        nordvpn_connect()
+
     exhausted: set[int] = set()  # card indices retired due to 3DS
 
     with sync_playwright() as p:
         for idx, email in enumerate(pending, 1):
+            if NORDVPN_ENABLED and idx > 1 and (idx - 1) % NORDVPN_RECONNECT_EVERY == 0:
+                nordvpn_disconnect()
+                nordvpn_connect()
+
             # Pick next non-exhausted card serially
             card_idx = None
             for offset in range(len(cards)):
