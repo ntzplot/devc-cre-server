@@ -57,6 +57,16 @@ let _proc     = null;
 let _logs     = [];
 let _logIdx   = 0;
 let _schedule = null;   // { time, count, fires_at, timer }
+// PC agent: agent/agent.js on a Windows PC polls us for start/stop and streams logs, frames and results back
+const _agent = { cmd: null, count: 1, running: false, lastSeen: 0 };
+const agentOnline = () => Date.now() - _agent.lastSeen < 20_000;
+const runTarget = () => (loadCfg().run_target === 'pc' ? 'pc' : 'server');
+const isRunning = () => runTarget() === 'pc' ? _agent.running : !!(_proc && _proc.exitCode === null);
+function agentToken() {
+  const c = loadCfg();
+  if (!c.agent_token) { c.agent_token = require('crypto').randomBytes(12).toString('hex'); try { saveCfg(c); } catch {} }
+  return c.agent_token;
+}
 
 // ── Config ─────────────────────────────────────────────────────────────────
 function loadCfg() {
@@ -125,7 +135,7 @@ function vpnUp() {
 }
 
 // ── Middleware ─────────────────────────────────────────────────────────────
-app.use(express.json());
+app.use(express.json({ limit: '5mb' }));
 
 // ── Routes ─────────────────────────────────────────────────────────────────
 
@@ -134,7 +144,7 @@ app.get('/', (req, res) => {
 });
 
 app.get('/api/status', (req, res) => {
-  const running = _proc && _proc.exitCode === null;
+  const running = isRunning();
   const cfg     = loadCfg();
   const sched   = _schedule ? { time: _schedule.time, count: _schedule.count, fires_at: _schedule.fires_at } : null;
   res.json({
@@ -151,6 +161,8 @@ app.get('/api/status', (req, res) => {
     do_mail_check: cfg.do_mail_check !== false,
     do_cancel:     cfg.do_cancel !== false,
     schedule:      sched,
+    run_target:    runTarget(),
+    agent:         { online: agentOnline(), token: agentToken() },
     updated_at:    new Date().toLocaleTimeString('en-GB'),
   });
 });
@@ -229,6 +241,54 @@ app.get('/api/stats', (req, res) => {
 
 // Live browser preview: the worker writes js/debug/live.jpg (+ live.json) about once a second
 const LIVE_DIR = path.join(BASE, 'js', 'debug');
+// ── PC agent API (agent/agent.js) ──────────────────────────────────────────
+const AGENT_FILES = ['config/config.json', 'cards.txt', '1/emails.csv', 'js/success.csv', 'js/failed.csv',
+  'js/successemailfull.csv', 'js/cancelled.csv', 'js/codes.csv', 'js/cancel_failed.csv'];
+const agentAuth = (req, res, next) => {
+  if (req.get('x-agent-token') !== agentToken()) return res.status(403).json({ error: 'bad token' });
+  _agent.lastSeen = Date.now();
+  next();
+};
+app.post('/api/agent/poll', agentAuth, (req, res) => {
+  const cmd = _agent.cmd; _agent.cmd = null;
+  if (!cmd) _agent.running = !!req.body?.busy;   // agent is the source of truth unless a command is in flight
+  res.json({ cmd, count: _agent.count });
+});
+app.get('/api/agent/bundle', agentAuth, (req, res) => {
+  const only = req.query.only ? String(req.query.only).split(',') : AGENT_FILES;
+  const files = {};
+  for (const rel of AGENT_FILES) {
+    if (!only.includes(rel)) continue;
+    try { files[rel] = fs.readFileSync(path.join(BASE, rel), 'utf8'); } catch { files[rel] = ''; }
+  }
+  res.json({ files });
+});
+app.post('/api/agent/log', agentAuth, (req, res) => {
+  for (const l of (req.body?.lines || [])) if (String(l).trim()) pushLog(l);
+  res.json({ ok: true });
+});
+app.post('/api/agent/results', agentAuth, (req, res) => {
+  // merge result CSVs: append any line the server does not have yet
+  for (const [rel, text] of Object.entries(req.body?.files || {})) {
+    if (!rel.startsWith('js/') || !AGENT_FILES.includes(rel)) continue;
+    const f = path.join(BASE, rel);
+    const cur = fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : '';
+    const have = new Set(cur.split(/\r?\n/));
+    const lines = String(text).split(/\r?\n/).filter(l => l.trim());
+    const add = lines.filter((l, i) => !have.has(l) && !(i === 0 && /^email,/.test(l) && cur));
+    if (add.length) fs.appendFileSync(f, (cur && !cur.endsWith('\n') ? '\n' : '') + add.join('\n') + '\n', 'utf8');
+  }
+  res.json({ ok: true });
+});
+app.post('/api/agent/frame', agentAuth, express.raw({ type: 'image/jpeg', limit: '5mb' }), (req, res) => {
+  try {
+    fs.mkdirSync(LIVE_DIR, { recursive: true });
+    fs.writeFileSync(path.join(LIVE_DIR, 'live.jpg'), req.body);
+    fs.writeFileSync(path.join(LIVE_DIR, 'live.json'), JSON.stringify({ url: req.get('x-url') || '', ts: Date.now() }));
+  } catch {}
+  res.json({ ok: true });
+});
+
 app.get('/api/live.jpg', (req, res) => {
   res.set('Cache-Control', 'no-store');
   const f = path.join(LIVE_DIR, 'live.jpg');
@@ -252,13 +312,21 @@ app.post('/api/config', (req, res) => {
 });
 
 app.post('/api/start', (req, res) => {
-  if (_proc && _proc.exitCode === null)
+  if (isRunning())
     return res.status(400).json({ error: 'already running' });
 
   if (countCards() === 0)
     return res.status(400).json({ error: 'No cards available — add some on the Cards page first.' });
 
   const count = parseInt(req.body?.count) || 1;
+
+  if (runTarget() === 'pc') {
+    if (!agentOnline()) return res.status(400).json({ error: 'PC agent is offline — start agent/agent.js on your PC (or switch Run on → Server).' });
+    _agent.cmd = 'start'; _agent.count = count; _agent.running = true;
+    _logs = []; _logIdx = 0;
+    pushLog(`── started JS checkout on PC (count=${count}) ──`);
+    return res.json({ ok: true });
+  }
   const env   = { ...process.env, AUTO_COUNT: String(count) };
   const cwd   = path.join(BASE, 'js');
 
@@ -289,6 +357,11 @@ app.post('/api/start', (req, res) => {
 });
 
 app.post('/api/stop', (req, res) => {
+  if (runTarget() === 'pc' && _agent.running) {
+    _agent.cmd = 'stop';
+    pushLog('── stop requested (PC) ──');
+    return res.json({ ok: true });
+  }
   if (!_proc || _proc.exitCode !== null)
     return res.status(400).json({ error: 'not running' });
   _proc.kill('SIGTERM');
@@ -346,7 +419,7 @@ app.post('/api/buy', async (req, res) => {
 // ── Auto-buy while a run is active: keep the email pool topped up ──────────
 let _autoBuying = false, _lastAutoBuy = 0;
 setInterval(async () => {
-  if (_autoBuying || !(_proc && _proc.exitCode === null)) return;
+  if (_autoBuying || !isRunning()) return;
   const ab = loadCfg().shop_api?.auto_buy || {};
   if (ab.enabled === false || Date.now() - _lastAutoBuy < 20_000) return;
   if (countEmails().pending > (parseInt(ab.min_accounts) || 0)) return;

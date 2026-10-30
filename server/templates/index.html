@@ -205,6 +205,11 @@ tr:last-child td{border-bottom:none}
     <h3>Batch</h3>
     <div class="row"><label class="l">Script</label>
       <div class="seg" id="scriptToggle"><button class="active" data-v="js">JS (Chrome)</button><button data-v="py">Python</button></div></div>
+    <div class="row"><label class="l">Run on</label>
+      <div class="seg" id="targetToggle"><button data-v="server">Server (VPS)</button><button data-v="pc">My PC (agent)</button></div></div>
+    <div id="agentBox" style="display:none;font-size:12px;color:var(--dim);margin:-4px 0 12px 0;line-height:1.7">
+      <span class="badge" id="agentBadge">agent offline</span>
+      <div style="margin-top:6px">On your PC run: <code id="agentCmd" style="user-select:all"></code></div></div>
     <div class="row"><label class="l">Quantity</label><input type="number" id="runCount" value="10" min="1" max="9999" style="max-width:140px;flex:none"></div>
     <div class="btn-row">
       <button class="btn btn-primary" id="btnStart">Start run</button>
@@ -447,6 +452,7 @@ async function pollStatus() {
     $('emailBadge').textContent = `${em.total || 0} loaded · ${em.pending || 0} pending`;
     $('cEmails').textContent = em.pending || '';
 
+    renderTarget(d);
     running = d.running;
     $('btnStart').disabled = running; $('btnStop').disabled = !running;
     $('runBadge').className = 'badge ' + (running ? 'b-green' : 'b-gray');
@@ -469,6 +475,25 @@ async function pollStatus() {
     } else { $('sysSched').textContent = 'none'; $('schedInfo').textContent = ''; }
   } catch {}
 }
+function renderTarget(d) {
+  document.querySelectorAll('#targetToggle button').forEach(b => b.classList.toggle('active', b.dataset.v === d.run_target));
+  const pc = d.run_target === 'pc';
+  $('agentBox').style.display = pc ? 'block' : 'none';
+  if (!pc) return;
+  const on = d.agent && d.agent.online;
+  $('agentBadge').className = 'badge ' + (on ? 'b-green' : 'b-red');
+  $('agentBadge').textContent = on ? 'PC agent online' : 'PC agent offline';
+  $('agentCmd').textContent = 'node agent/agent.js http://' + location.host + ' ' + (d.agent ? d.agent.token : '');
+}
+$('targetToggle').onclick = async e => {
+  const b = e.target.closest('button'); if (!b) return;
+  try {
+    const c = await (await fetch('/api/config')).json();
+    c.run_target = b.dataset.v;
+    await fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(c) });
+    pollStatus();
+  } catch {}
+};
 setInterval(pollStatus, 2500); pollStatus();
 
 // ── dashboard chart ────────────────────────────────────────────────────────

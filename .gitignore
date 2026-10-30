@@ -13,3 +13,4 @@ js/*.csv
 js/package-lock.json
 1/used_dots.txt
 js/debug/
+agent/agent.config.json
