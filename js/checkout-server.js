@@ -175,7 +175,44 @@ function generateEmail() {
   return `${GMAIL_BASE}+${suffix}@${GMAIL_DOMAIN}`;
 }
 
+// ── Hotmail inbox (smail1s OAuth API): find the Devyce app/login code ───────────────
+// Creds line in 1/emails.csv: email|password|refresh_token|client_id
+function hotmailCreds(email) {
+  const line = loadLines(EMAILS_CSV).find(l => !l.startsWith('#') && l.split('|')[0].trim().toLowerCase() === email.toLowerCase());
+  return line ? line.trim() : email;
+}
+// The mail is HTML: strip tags first, then take "Your app code is XXXXXX" / "Login using your code: XXXXXX"
+function parseDevyceCode(html) {
+  const text = String(html || '').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ');
+  const m = text.match(/Your app code is\s+([A-Z0-9]{4,10})\b/) || text.match(/Login using your code:?\s+([A-Z0-9]{4,10})\b/);
+  return m ? m[1] : null;
+}
+async function fetchHotmailMessages(email) {
+  const url = (CFG.smail1s && CFG.smail1s.api_url) || 'https://smail1s.com/get_messages';
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0' },
+    body: JSON.stringify({ mode: (CFG.smail1s && CFG.smail1s.mode) || 'oauth', data: hotmailCreds(email) }),
+    signal: AbortSignal.timeout(30_000),
+  });
+  const j = await res.json();
+  return (j.data || []).flatMap(a => a.messages || []);
+}
+
 async function fetchDevyceCode(email, timeoutMs = 120_000) {
+  if (EMAIL_SOURCE === 'hotmail') {
+    const until = Date.now() + timeoutMs;
+    while (Date.now() < until) {
+      await sleep(5000);
+      try {
+        for (const msg of await fetchHotmailMessages(email)) {
+          const code = parseDevyceCode(msg.message) || (/^[A-Z0-9]{4,10}$/.test(msg.code || '') ? msg.code : null);
+          if (code) return code;
+        }
+      } catch (e) { console.log(`  [Hotmail poll] ${e.message}`); }
+    }
+    return null;
+  }
   const url      = `${GMAIL_API_URL}/emails?email=${encodeURIComponent(email)}`;
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -740,7 +777,6 @@ async function run() {
   if (EMAIL_SOURCE === 'hotmail') {
     pending = await hotmailBatch(count, done, tried);
     console.log(`\n[Hotmail] ${pending.length} to process | Cards: ${cards.length}\n`);
-    if (DO_MAIL_CHECK) console.log('[Hotmail] mail check is not supported in the JS checkout - skipping login-code fetch');
   } else {
     console.log(`\n[Mail] Generating ${count} emails...`);
     for (let i = 0; i < count; i++) {
@@ -799,7 +835,7 @@ async function run() {
         await postSuccessLine(email);
         console.log('  ✓ checkout success');
 
-        if (DO_MAIL_CHECK && EMAIL_SOURCE !== 'hotmail') {
+        if (DO_MAIL_CHECK) {
           console.log('  📩 Fetching Devyce code...');
           const code = await fetchDevyceCode(email);
           if (code) {
