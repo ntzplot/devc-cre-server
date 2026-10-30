@@ -118,7 +118,7 @@ tr:last-child td{border-bottom:none}
 .reason:last-child{border-bottom:none}.reason span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* ── logs ── */
-#logBox{background:#fcfcfd;border:1px solid var(--border);border-radius:8px;padding:14px;height:calc(100vh - 230px);overflow-y:auto;font-family:'JetBrains Mono',Consolas,monospace;font-size:12px;line-height:1.7;color:var(--dim)}
+#logBox{background:#fcfcfd;border:1px solid var(--border);border-radius:8px;padding:14px;height:40vh;overflow-y:auto;font-family:'JetBrains Mono',Consolas,monospace;font-size:12px;line-height:1.7;color:var(--dim)}
 #logBox .line{white-space:pre-wrap;word-break:break-all}
 #logBox .t{color:var(--muted)}
 #logBox .ok{color:var(--green)}#logBox .err{color:var(--red)}#logBox .warn{color:var(--amber)}#logBox .info{color:var(--blue)}#logBox .sep{color:var(--muted);font-style:italic}
@@ -220,6 +220,11 @@ tr:last-child td{border-bottom:none}
     <div style="display:flex;gap:12px;align-items:center">
       <label style="font-size:12px;color:var(--dim);display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" id="autoScroll" checked> Auto-scroll</label>
       <button class="btn" id="btnClear">Clear</button></div></div>
+  <div class="card" style="margin-bottom:14px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;font-size:12px;color:var(--dim)">
+      <b>Live browser</b><span id="liveInfo">no frames yet</span></div>
+    <img id="liveImg" alt="" style="width:100%;max-height:60vh;object-fit:contain;background:#f3f4f6;border-radius:8px;display:none">
+  </div>
   <div class="card"><div id="logBox"></div></div>
 </section>
 
@@ -405,6 +410,19 @@ async function pollLogs() {
   } catch {}
 }
 setInterval(pollLogs, 1500);
+async function pollLive() {
+  if (!$('s-logs').classList.contains('active')) return;
+  try {
+    const m = await (await fetch('/api/live/meta')).json();
+    if (!m.ts) return;
+    const age = m.age;
+    $('liveInfo').textContent = (age > 15 ? 'stale (' + age + 's ago) · ' : 'live · ') + (m.url || '');
+    const img = $('liveImg');
+    img.onload = () => { img.style.display = 'block'; };
+    img.src = '/api/live.jpg?t=' + m.ts;
+  } catch {}
+}
+setInterval(pollLive, 1200);
 $('btnClear').onclick = () => { $('logBox').innerHTML = ''; $('logBox2').innerHTML = ''; };
 
 // ── status ─────────────────────────────────────────────────────────────────

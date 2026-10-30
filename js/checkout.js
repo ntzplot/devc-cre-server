@@ -677,6 +677,24 @@ async function cancelSubscription(email, code) {
 
 // ── Main loop ─────────────────────────────────────────────────────────────────
 
+// Live preview: snapshot the page every ~1s so the dashboard can show what the browser sees.
+function startLive(page) {
+  const dir = path.join(__dirname, 'debug');
+  try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+  let busy = false;
+  const t = setInterval(async () => {
+    if (busy) return; busy = true;
+    try {
+      const tmp = path.join(dir, 'live.tmp.jpg');
+      await page.screenshot({ path: tmp, type: 'jpeg', quality: 55, timeout: 4000 });
+      fs.renameSync(tmp, path.join(dir, 'live.jpg'));
+      fs.writeFileSync(path.join(dir, 'live.json'), JSON.stringify({ url: page.url(), ts: Date.now() }));
+    } catch {}
+    busy = false;
+  }, 1000);
+  return () => clearInterval(t);
+}
+
 // Hotmail accounts not yet succeeded/tried this run. If the pool is empty, wait (the
 // dashboard auto-buys while a run is active) and re-read emails.csv until some arrive.
 async function hotmailBatch(n, done, tried) {
@@ -757,6 +775,7 @@ async function run() {
     for (let attempt = 1; attempt <= 3; attempt++) {
       const { ctx, tmpDir } = await makeBrowser();
       const page = await ctx.newPage();
+      const stopLive = startLive(page);
       try {
         await checkout(page, email, card, identity);
         appendResult(SUCCESS_CSV, email);
@@ -822,6 +841,7 @@ async function run() {
         break;
 
       } finally {
+        stopLive();
         try { await ctx.close(); } catch {}
         try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
       }

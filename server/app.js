@@ -227,6 +227,18 @@ app.get('/api/stats', (req, res) => {
   res.json({ days, series, topReasons });
 });
 
+// Live browser preview: the worker writes js/debug/live.jpg (+ live.json) about once a second
+const LIVE_DIR = path.join(BASE, 'js', 'debug');
+app.get('/api/live.jpg', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const f = path.join(LIVE_DIR, 'live.jpg');
+  fs.existsSync(f) ? res.sendFile(f) : res.status(404).end();
+});
+app.get('/api/live/meta', (req, res) => {
+  try { const m = JSON.parse(fs.readFileSync(path.join(LIVE_DIR, 'live.json'), 'utf8')); res.json({ ...m, age: Math.round((Date.now() - m.ts) / 1000) }); }
+  catch { res.json({}); }
+});
+
 app.get('/api/logs', (req, res) => {
   const since = parseInt(req.query.since) || 0;
   res.json({ lines: _logs.filter(l => l.i >= since) });
