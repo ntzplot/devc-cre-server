@@ -716,6 +716,14 @@ async function run() {
   console.log(`Mail check: ${DO_MAIL_CHECK ? 'ON' : 'OFF'} | Auto-cancel: ${DO_CANCEL ? 'ON' : 'OFF'}`);
   console.log(`Addresses loaded: ${ADDRESSES.length} | Names: ${loadLines(FIRSTNAME_TXT).length} first / ${loadLines(LASTNAME_TXT).length} last\n`);
 
+  // Proxy mode: make sure a leftover NordVPN tunnel isn't carrying the traffic, then log the proxy's exit IP
+  if (!CFG.nordvpn.enabled) spawnSync('nordvpn', ['disconnect'], { timeout: 15_000 });
+  if (PROXY_CFG.enabled) {
+    const r = spawnSync('curl', ['-s', '-m', '20', '-x', PROXY_CFG.server, '-U', PROXY_CFG.username + ':' + PROXY_CFG.password, 'https://ipinfo.io/json'], { encoding: 'utf8', timeout: 25_000 });
+    try { const j = JSON.parse(r.stdout); console.log('Proxy exit IP: ' + j.ip + ' (' + j.city + ', ' + j.country + ')'); }
+    catch { console.log('Proxy check FAILED from this machine: ' + ((r.stderr || r.stdout || 'no response').toString().trim().slice(0, 120) || 'timeout / no response')); }
+  }
+
   const count = await askCount();
   const done  = alreadyProcessed(EMAIL_SOURCE === 'hotmail' ? [SUCCESS_CSV] : undefined);
   const cards = readCards();

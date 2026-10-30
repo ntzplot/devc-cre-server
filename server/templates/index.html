@@ -403,11 +403,14 @@ function appendLog(line) {
     if (id === 'logBox2' || $('autoScroll').checked) box.scrollTop = box.scrollHeight;
   }
 }
+let logBusy = false;
 async function pollLogs() {
+  if (logBusy) return; logBusy = true;   // overlapping polls used to append the same lines twice
   try {
     const data = await (await fetch(`/api/logs?since=${logIndex}`)).json();
-    for (const l of (data.lines || [])) { appendLog(l); logIndex = l.i + 1; }
+    for (const l of (data.lines || [])) { if (l.i < logIndex) continue; appendLog(l); logIndex = l.i + 1; }
   } catch {}
+  logBusy = false;
 }
 setInterval(pollLogs, 1500);
 async function pollLive() {
