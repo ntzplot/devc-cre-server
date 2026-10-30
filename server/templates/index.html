@@ -204,7 +204,7 @@ tr:last-child td{border-bottom:none}
   <div class="card">
     <h3>Batch</h3>
     <div class="row"><label class="l">Script</label>
-      <div class="seg" id="scriptToggle"><button class="active" data-v="js">JS (Chrome)</button><button data-v="py">Python</button></div></div>
+      <div class="seg" id="scriptToggle"><button class="active" data-v="js">JS (Chrome)</button><button data-v="py">Python</button><button data-v="working">Working</button></div></div>
     <div class="row"><label class="l">Run on</label>
       <div class="seg" id="targetToggle"><button data-v="server">Server (VPS)</button><button data-v="pc">My PC (agent)</button></div></div>
     <div id="agentBox" style="display:none;font-size:12px;color:var(--dim);margin:-4px 0 12px 0;line-height:1.7">
@@ -314,7 +314,7 @@ tr:last-child td{border-bottom:none}
   <div class="card">
     <div class="row"><label class="l">Start time</label><input type="time" id="schedTime" style="max-width:160px;flex:none"></div>
     <div class="row"><label class="l">Quantity</label><input type="number" id="schedCount" value="10" min="1" style="max-width:140px;flex:none"></div>
-    <div class="row"><label class="l">Script</label><select id="schedScript" style="max-width:200px;flex:none"><option value="js">JS (Chrome)</option><option value="py">Python</option></select></div>
+    <div class="row"><label class="l">Script</label><select id="schedScript" style="max-width:200px;flex:none"><option value="js">JS (Chrome)</option><option value="py">Python</option><option value="working">Working</option></select></div>
     <div class="btn-row"><button class="btn btn-primary" id="btnSched">Set schedule</button><button class="btn" id="btnSchedClear">Clear</button></div>
     <div id="schedInfo" style="font-size:12px;color:var(--amber);margin-top:12px"></div>
   </div>

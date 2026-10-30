@@ -388,12 +388,6 @@ async function makeBrowser(prefix = 'chrome_tmp_') {
     args: [
       '--disable-blink-features=AutomationControlled',
       '--start-maximized',
-      '--no-first-run',
-      '--no-default-browser-check',
-      '--disable-notifications',
-      '--disable-popup-blocking',
-      '--metrics-recording-only',
-      '--use-mock-keychain',
     ],
     ignoreDefaultArgs: ['--enable-automation'],
     viewport: null,
@@ -564,7 +558,7 @@ async function handle3ds(page, kyashEmail = 'default') {
 // ── Checkout ──────────────────────────────────────────────────────────────────
 
 async function checkout(page, email, card, identity) {
-  await page.goto(START_URL, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+  await page.goto(START_URL, { waitUntil: 'networkidle', timeout: 60_000 });
   await sleep(rand(2000, 3000));
 
   await waitClick(
@@ -576,6 +570,11 @@ async function checkout(page, email, card, identity) {
   await sleep(2000);
   const cb    = page.frameLocator(IFRAME_ID);
   const frame = await iframeEl.contentFrame();
+
+  if (frame) {
+    const errCount = await frame.locator(':text("Something went wrong")').count().catch(() => 0);
+    if (errCount > 0) throw new Error('Chargebee error page — retrying');
+  }
 
   await waitClick(cb.locator('[data-cb-id="cart_submit"]'), TIMEOUT, page);
   await sleep(1200);

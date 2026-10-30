@@ -290,9 +290,6 @@ def make_browser(p):
         args=[
             "--disable-blink-features=AutomationControlled",
             "--start-maximized",
-            "--no-first-run",
-            "--no-default-browser-check",
-            "--disable-notifications",
         ],
         ignore_default_args=["--enable-automation"],
         no_viewport=True,
@@ -365,7 +362,7 @@ def _handle_3ds(page, kyash_email: str = "default"):
 # ── Checkout ──────────────────────────────────────────────────────────────────
 
 def checkout(page, email: str, card: dict, identity: dict) -> None:
-    page.goto(START_URL, wait_until="domcontentloaded", timeout=60_000)
+    page.goto(START_URL, wait_until="networkidle", timeout=60_000)
     time.sleep(random.uniform(2.0, 3.0))
 
     wait_click(page.locator('[data-cb-type="checkout"][data-cb-plan-id="devyce-solo-xpat-int"]'))
@@ -374,6 +371,9 @@ def checkout(page, email: str, card: dict, identity: dict) -> None:
     time.sleep(2.0)
     cb    = page.frame_locator(IFRAME_ID)
     frame = iframe_el.content_frame()
+
+    if frame and frame.locator('text=Something went wrong').count() > 0:
+        raise Exception("Chargebee error page — retrying")
 
     wait_click(cb.locator('[data-cb-id="cart_submit"]'))
     time.sleep(1.2)

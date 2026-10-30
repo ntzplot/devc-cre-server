@@ -206,6 +206,9 @@ def api_start():
     if script == "js":
         cmd = ["node", str(BASE / "js" / "checkout.js")]
         cwd = str(BASE / "js")
+    elif script == "working":
+        cmd = [sys.executable, str(BASE / "working" / "1" / "checkout.py")]
+        cwd = str(BASE / "working" / "1")
     else:
         cmd = [sys.executable, str(BASE / "1" / "checkout.py")]
         cwd = str(BASE / "1")
