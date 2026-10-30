@@ -252,7 +252,7 @@ const agentAuth = (req, res, next) => {
 app.post('/api/agent/poll', agentAuth, (req, res) => {
   const cmd = _agent.cmd; _agent.cmd = null;
   if (!cmd) _agent.running = !!req.body?.busy;   // agent is the source of truth unless a command is in flight
-  res.json({ cmd, count: _agent.count });
+  res.json({ cmd, count: _agent.count, script: _agent.script || 'js' });
 });
 app.get('/api/agent/bundle', agentAuth, (req, res) => {
   const only = req.query.only ? String(req.query.only).split(',') : AGENT_FILES;
@@ -323,9 +323,9 @@ app.post('/api/start', (req, res) => {
 
   if (runTarget() === 'pc') {
     if (!agentOnline()) return res.status(400).json({ error: 'PC agent is offline — start agent/agent.js on your PC (or switch Run on → Server).' });
-    _agent.cmd = 'start'; _agent.count = count; _agent.running = true;
+    _agent.cmd = 'start'; _agent.count = count; _agent.script = script; _agent.running = true;
     _logs = []; _logIdx = 0;
-    pushLog(`── started JS checkout on PC (count=${count}) ──`);
+    pushLog(`── started ${script} checkout on PC (count=${count}) ──`);
     return res.json({ ok: true });
   }
   const env = { ...process.env, AUTO_COUNT: String(count) };

@@ -28,7 +28,7 @@ if (!conf.server || !conf.token) {
 fs.writeFileSync(CONF, JSON.stringify({ server: conf.server, token: conf.token }, null, 2));
 
 const RESULT_FILES = ['js/success.csv', 'js/failed.csv', 'js/successemailfull.csv', 'js/cancelled.csv', 'js/codes.csv', 'js/cancel_failed.csv'];
-const SCRIPT = process.platform === 'win32' ? 'checkout.js' : 'checkout-server.js';
+const JS_SCRIPT = process.platform === 'win32' ? 'checkout.js' : 'checkout-server.js';
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const stamp = () => new Date().toLocaleTimeString('en-GB');
@@ -104,14 +104,26 @@ function killChild() {
   else try { process.kill(-child.pid, 'SIGTERM'); } catch { try { child.kill('SIGTERM'); } catch {} }
 }
 
-async function startRun(count) {
+async function startRun(count, script = 'js') {
   starting = true;
   try {
     await uploadResults();               // don't lose anything produced offline
     await syncDown();                    // config, cards, email pool, results from the dashboard
-    say(`starting ${SCRIPT} (count=${count})`);
-    const p = spawn(process.execPath, [path.join(JSDIR, SCRIPT)], {
-      cwd: JSDIR, env: { ...process.env, AUTO_COUNT: String(count) },
+
+    let cmd, args, cwd;
+    if (script === 'working') {
+      cwd  = path.join(ROOT, 'working', '1');
+      cmd  = 'python';
+      args = [path.join(cwd, 'checkout.py')];
+    } else {
+      cwd  = JSDIR;
+      cmd  = process.execPath;
+      args = [path.join(JSDIR, JS_SCRIPT)];
+    }
+
+    say(`starting ${script} (count=${count})`);
+    const p = spawn(cmd, args, {
+      cwd, env: { ...process.env, AUTO_COUNT: String(count) },
       stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32',
     });
     child = p;
@@ -138,7 +150,7 @@ async function startRun(count) {
     try {
       const r = await api('POST', '/api/agent/poll', { busy: !!child || starting });
       warned = false;
-      if (r.cmd === 'start' && !child && !starting) startRun(r.count);
+      if (r.cmd === 'start' && !child && !starting) startRun(r.count, r.script || 'js');
       if (r.cmd === 'stop' && child) { say('stop requested'); pushLine('── stopped by user ──'); killChild(); }
     } catch (e) {
       if (!warned) say('dashboard unreachable: ' + e.message + ' (retrying)');
