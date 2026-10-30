@@ -318,7 +318,8 @@ app.post('/api/start', (req, res) => {
   if (countCards() === 0)
     return res.status(400).json({ error: 'No cards available — add some on the Cards page first.' });
 
-  const count = parseInt(req.body?.count) || 1;
+  const count  = parseInt(req.body?.count) || 1;
+  const script = req.body?.script || 'js';
 
   if (runTarget() === 'pc') {
     if (!agentOnline()) return res.status(400).json({ error: 'PC agent is offline — start agent/agent.js on your PC (or switch Run on → Server).' });
@@ -327,23 +328,33 @@ app.post('/api/start', (req, res) => {
     pushLog(`── started JS checkout on PC (count=${count}) ──`);
     return res.json({ ok: true });
   }
-  const env   = { ...process.env, AUTO_COUNT: String(count) };
-  const cwd   = path.join(BASE, 'js');
+  const env = { ...process.env, AUTO_COUNT: String(count) };
 
-  try {
-    // Linux VPS: run the server variant inside a virtual display so real (headed) Chrome works
-    const [cmd, args] = dockerWorker()
+  let cmd, args, cwd;
+  if (script === 'working') {
+    cwd  = path.join(BASE, 'working', '1');
+    const py = IS_LINUX ? 'python3' : 'python';
+    const script_path = path.join(cwd, 'checkout.py');
+    [cmd, args] = IS_LINUX
+      ? ['xvfb-run', ['-a', '--server-args=-screen 0 1920x1080x24', py, script_path]]
+      : [py, [script_path]];
+  } else {
+    cwd = path.join(BASE, 'js');
+    [cmd, args] = dockerWorker()
       ? ['docker', ['exec', '-i', '-w', '/app/js', '-e', `AUTO_COUNT=${count}`, WORKER, 'xvfb-run', '-a',
           '--server-args=-screen 0 1920x1080x24', 'node', 'checkout-server.js']]
       : IS_LINUX
       ? ['xvfb-run', ['-a', '--server-args=-screen 0 1920x1080x24', 'node', path.join(cwd, 'checkout-server.js')]]
       : ['node', [path.join(cwd, 'checkout.js')]];
+  }
+
+  try {
     const proc = spawn(cmd, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] });
     proc.on('error', e => pushLog(`✗ failed to launch (${cmd}): ${e.message}`));
     _proc   = proc;
     _logs   = [];
     _logIdx = 0;
-    pushLog(`── started JS checkout (count=${count}) ──`);
+    pushLog(`── started ${script} checkout (count=${count}) ──`);
 
     const cap = data => String(data).split('\n').forEach(l => { if (l.trim()) pushLog(l); });
     proc.stdout.on('data', cap);
