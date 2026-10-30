@@ -237,6 +237,7 @@ def make_browser(p):
     tmp_dir = tempfile.mkdtemp(prefix="chrome_tmp_")
     ctx = p.chromium.launch_persistent_context(
         user_data_dir=tmp_dir,
+        channel="chrome",
         headless=False,
         args=[
             "--disable-blink-features=AutomationControlled",
