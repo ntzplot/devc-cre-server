@@ -271,6 +271,7 @@ function nordvpnAdapterUp() {
 }
 
 async function nordvpnConnect(country = NORDVPN_CTRY) {
+  if (!CFG.nordvpn.enabled) return;
   // keep SSH + dashboard reachable while the VPN is up
   for (const port of ['22', '5050']) {
     const r = spawnSync('nordvpn', ['allowlist', 'add', 'port', port], { encoding: 'utf8', timeout: 10_000 });
@@ -288,6 +289,7 @@ async function nordvpnConnect(country = NORDVPN_CTRY) {
 }
 
 async function nordvpnDisconnect() {
+  if (!CFG.nordvpn.enabled) return;
   console.log('[NordVPN] Disconnecting...');
   try { spawnSync('nordvpn', ['disconnect'], { timeout: 30_000 }); }
   catch (e) { console.log(`[NordVPN] Disconnect error: ${e.message}`); return; }
@@ -717,7 +719,7 @@ async function hotmailBatch(n, done, tried) {
 }
 
 async function run() {
-  console.log(`Proxy: ${PROXY_CFG.enabled ? 'ON' : 'OFF'} | NordVPN: ${NORDVPN_CTRY} every ${NORDVPN_EVERY}`);
+  console.log(`Proxy: ${PROXY_CFG.enabled ? 'ON' : 'OFF'} | NordVPN: ${CFG.nordvpn.enabled ? NORDVPN_CTRY + ' every ' + NORDVPN_EVERY : 'OFF'}`);
   console.log(`Mail check: ${DO_MAIL_CHECK ? 'ON' : 'OFF'} | Auto-cancel: ${DO_CANCEL ? 'ON' : 'OFF'}`);
   console.log(`Addresses loaded: ${ADDRESSES.length} | Names: ${loadLines(FIRSTNAME_TXT).length} first / ${loadLines(LASTNAME_TXT).length} last\n`);
 

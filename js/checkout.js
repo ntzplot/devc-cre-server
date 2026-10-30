@@ -273,6 +273,7 @@ function nordvpnAdapterUp() {
 }
 
 async function nordvpnConnect(country = NORDVPN_CTRY) {
+  if (!CFG.nordvpn.enabled) return;
   console.log(`[NordVPN] Connecting to ${country}...`);
   try { spawnSync(NORDVPN_EXE, ['-c', '-g', country], { timeout: 30_000 }); }
   catch (e) { console.log(`[NordVPN] Connect error: ${e.message}`); return; }
@@ -284,6 +285,7 @@ async function nordvpnConnect(country = NORDVPN_CTRY) {
 }
 
 async function nordvpnDisconnect() {
+  if (!CFG.nordvpn.enabled) return;
   console.log('[NordVPN] Disconnecting...');
   try { spawnSync(NORDVPN_EXE, ['-d'], { timeout: 15_000 }); }
   catch (e) { console.log(`[NordVPN] Disconnect error: ${e.message}`); return; }
@@ -710,7 +712,7 @@ async function hotmailBatch(n, done, tried) {
 }
 
 async function run() {
-  console.log(`Proxy: ${PROXY_CFG.enabled ? 'ON' : 'OFF'} | NordVPN: ${NORDVPN_CTRY} every ${NORDVPN_EVERY}`);
+  console.log(`Proxy: ${PROXY_CFG.enabled ? 'ON' : 'OFF'} | NordVPN: ${CFG.nordvpn.enabled ? NORDVPN_CTRY + ' every ' + NORDVPN_EVERY : 'OFF'}`);
   console.log(`Mail check: ${DO_MAIL_CHECK ? 'ON' : 'OFF'} | Auto-cancel: ${DO_CANCEL ? 'ON' : 'OFF'}`);
   console.log(`Addresses loaded: ${ADDRESSES.length} | Names: ${loadLines(FIRSTNAME_TXT).length} first / ${loadLines(LASTNAME_TXT).length} last\n`);
 
